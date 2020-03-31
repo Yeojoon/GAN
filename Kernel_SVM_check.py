@@ -14,9 +14,7 @@ from pyro.contrib.gp.kernels.isotropic import RBF
 from pyro.contrib.gp.kernels import DotProduct
 from pyro.contrib.gp.kernels.dot_product import Polynomial
 from sklearn.svm import SVC
-from data.XORdataset import XORdataset_uniform, XORdataset_gaussian
 
-from visualizer import plot_outputdata, checkviz
 import time
 
 import os
