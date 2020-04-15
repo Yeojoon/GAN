@@ -94,7 +94,7 @@ def SVM_with_kernel(real_data, fake_data):
     data = data.cpu().detach().numpy()
     y = y.cpu().detach().numpy().reshape(-1)
     
-    clf = SVC()
+    clf = SVC(gamma='auto')
     clf.fit(data, y)
     alpha = clf.dual_coef_.reshape(-1)
     rho = clf.intercept_
@@ -243,6 +243,9 @@ for epoch in range(num_epochs):
         X, Y = np.meshgrid(np.linspace(-8, 8, 50), np.linspace(-8, 8, 50))
         X_tensor = torch.from_numpy(X)
         Y_tensor = torch.from_numpy(Y)
+        if torch.cuda.is_available():
+            X_tensor = torch.from_numpy(X).cuda()
+            Y_tensor = torch.from_numpy(Y).cuda()
         Z = discriminator2(X_tensor, Y_tensor, alpha, rho, support_vecs)
         Z = Z.cpu().detach().numpy()
         real_t_data = data.data
