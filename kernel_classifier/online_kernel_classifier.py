@@ -6,7 +6,8 @@ log_interval = 10
 
 class KernelClassifier:
     def __init__(self,dim,kernel='gaussian',gamma=1.0,budget=512,
-                 lmbda=1.0,eta=0.01, device=torch.device("cuda")):
+                 lmbda=1.0,eta=0.01, device=torch.device("cuda"), lossfn = 'hinge'):
+        self.lossfn = lossfn
         self.device = device
         self.kern=kernel
         self.budget = budget
@@ -114,19 +115,29 @@ class KernelClassifier:
     
     def update(self,X,Y,verbose=False):
         
-        newalphas =   self.eta * ((Y + 1)/2 - self.predict_proba(X))
-        newkeypoints = X
-        
-        self.offset += self.eta * ((Y + 1)/2 - self.predict_proba(X)).mean()
-        
-        if verbose:
-            print(self.predict_proba(X))
-            print(Y)
-            print(newalphas)
-        
-        if torch.isnan(newalphas).any():
-            print("some alphas are nan")
-            raise Exception("nan encountered in generating newalphas")
+        if self.lossfn = 'logistic':
+
+            newalphas =   self.eta * ((Y + 1)/2 - self.predict_proba(X))
+            newkeypoints = X
+
+            self.offset += self.eta * ((Y + 1)/2 - self.predict_proba(X)).mean()
+
+            if verbose:
+                print(self.predict_proba(X))
+                print(Y)
+                print(newalphas)
+
+            if torch.isnan(newalphas).any():
+                print("some alphas are nan")
+                raise Exception("nan encountered in generating newalphas")
+        elif self.lossfn = 'hinge':
+            """
+            loss(theta,x,y) = max(0,1-yf_theta(x))
+            loss'(theta,x,y) = 1[yf_theta(x) < 1](yf_theta(x))\nabla_theta f_theta)            
+            """
+            funvals = self.funceval(X)
+            newalphas = -self.eta * Y * funvals * (funvals < 1).int()  
+            newkeypoints = X
         
         
         self._insert_keypoints_alphas(X,newalphas)
