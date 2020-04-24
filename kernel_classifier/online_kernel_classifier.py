@@ -6,28 +6,35 @@ log_interval = 10
 
 class KernelClassifier:
     def __init__(self,dim,kernel='gaussian',gamma=1.0,budget=512,
-                 lmbda=1.0,eta=0.01, device=torch.device("cuda"), lossfn = 'hinge'):
+                 lmbda=1.0,eta=0.01, margin=1.0, degree=3, coef0=0.0, device=torch.device("cuda"), lossfn = 'logistic'):
         self.lossfn = lossfn
         self.device = device
         self.kern=kernel
         self.budget = budget
         self.lmbda = lmbda
         self.eta = eta
+        self.margin = margin
         self.dim = dim
         self.gamma = gamma
+        self.degree = degree
+        self.coef0 = coef0
         self.alphas = torch.zeros(self.budget,device=self.device)
         self.keypoints = torch.zeros(self.budget,self.dim,device=self.device)
         self.pointer = 0
         self.offset = 0.0
+    
     
     def kernel(self,X):
         if self.kern == 'linear':
             return self.kernel_linear(X)
         elif self.kern == 'gaussian':
             return self.kernel_gaussian(X)
+        elif self.kern == 'poly':
+            return self.kernel_poly(X)
         else:
             raise Exception('No kernel specified')
-        
+      
+    
     def kernel_gaussian(self,X):
         Z = self.keypoints
         Xnorms = (X*X).sum(dim=1)
@@ -41,6 +48,12 @@ class KernelClassifier:
     def kernel_linear(self,X):
         Z = self.keypoints
         return X @ Z.T 
+    
+    
+    def kernel_poly(self, X):
+        Z = self.keypoints
+        return (self.gamma * X @ Z.T + self.coef0)**self.degree
+        
         
     def funceval(self,X):
         kernel_vals = self.kernel(X)
@@ -52,6 +65,7 @@ class KernelClassifier:
             raise Exception("nan encountered in funceval calculation")
         return kernel_vals @ self.alphas + self.offset
     
+    
     def predict_proba(self,X):
         vals = self.funceval(X)
         expnegtwovals = torch.exp(-vals)
@@ -62,14 +76,17 @@ class KernelClassifier:
             raise Exception("nan encountered in predict_proba calculation")
         return probs
     
+    
     def predict(self,X):
         vals = self.funceval(X)
         return torch.sign(vals)
+    
     
     def error(self,X,Y):
         signs = torch.sign(self.funceval(X) * Y)
         return torch.mean(1 - signs)/2
 
+    
     def train(self,train_loader,test_loader=False,num_epochs=5):
         train_losses = []
         train_counter = []
@@ -88,6 +105,7 @@ class KernelClassifier:
                         (batch_idx*64) + ((epoch-1)*len(train_loader.dataset)))
             if test_loader: self.test(test_loader)
 
+                
     def test(self,test_loader):
         test_losses, test_errors, test_loss, error_rate, counter = [], [], 0, 0, 0
         for data, target in test_loader:
@@ -101,26 +119,38 @@ class KernelClassifier:
         test_errors.append(error_rate)
         print('\nTest set: Avg. loss: {:.4f}, Error: {:.4f}\n'.format(test_loss, error_rate))
     
+    
     def losses(self,X,Y):
         vals = self.funceval(X)
-        lss = torch.log(1 + torch.exp(-Y*vals))
+        if self.lossfn == 'logistic':
+            lss = torch.log(1 + torch.exp(-Y*vals))
+        elif self.lossfn == 'hinge':
+            zeros = torch.zeros(len(Y), device=self.device)
+            lss_vals = self.margin - Y*vals
+            lss = torch.max(zeros, lss_vals)
         if torch.isinf(lss).any():
             print(lss)
             print(-2*Y*vals)
             raise Exception("inf encountered in calculating losses")
         return lss
     
+    
     def avgloss(self,X,Y):
         return torch.mean(self.losses(X,Y))
     
+    
     def update(self,X,Y,verbose=False):
+        funcvals = self.funceval(X)
+        self.alphas *= (1 - self.eta * self.lmbda)
         
-        if self.lossfn = 'logistic':
-
-            newalphas =   self.eta * ((Y + 1)/2 - self.predict_proba(X))
+        if self.lossfn == 'logistic':
+            
+            newalphas = self.eta * Y * torch.exp(-funcvals*Y) / (1 + torch.exp(-funcvals*Y))
+            #newalphas =   self.eta * ((Y + 1)/2 - self.predict_proba(X))
             newkeypoints = X
-
-            self.offset += self.eta * ((Y + 1)/2 - self.predict_proba(X)).mean()
+            
+            self.offset += self.eta * (Y * torch.exp(-funcvals*Y) / (1 + torch.exp(-funcvals*Y))).mean()
+            #self.offset += self.eta * ((Y + 1)/2 - self.predict_proba(X)).mean()
 
             if verbose:
                 print(self.predict_proba(X))
@@ -130,17 +160,21 @@ class KernelClassifier:
             if torch.isnan(newalphas).any():
                 print("some alphas are nan")
                 raise Exception("nan encountered in generating newalphas")
-        elif self.lossfn = 'hinge':
+                
+        elif self.lossfn == 'hinge':
             """
             loss(theta,x,y) = max(0,1-yf_theta(x))
             loss'(theta,x,y) = 1[yf_theta(x) < 1](yf_theta(x))\nabla_theta f_theta)            
             """
-            funvals = self.funceval(X)
-            newalphas = -self.eta * Y * funvals * (funvals < 1).int()  
+            sigma = torch.where(Y*funcvals<=self.margin, torch.ones(1, device=self.device), torch.zeros(1, device=self.device))
+            newalphas = self.eta * sigma * Y  
             newkeypoints = X
+            
+            self.offset += self.eta * (sigma * Y).mean()
         
         
         self._insert_keypoints_alphas(X,newalphas)
+    
     
     def _insert_keypoints_alphas(self,newkeypoints,newalphas):
     
