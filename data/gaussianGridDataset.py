@@ -10,9 +10,9 @@ class gaussianGridDataset(Dataset):
             for j in range(n):
                 mean_y = self.grid[j]
                 if self.data is None:
-                    self.data = np.random.multivariate_normal((mean_x, mean_y), cov=[[sig, 0.0], [0.0, sig]], size=n_data)
+                    self.data = np.random.multivariate_normal((mean_x, mean_y), cov=[[sig**2, 0.0], [0.0, sig**2]], size=n_data)
                 else:
-                    self.data = np.concatenate((self.data, np.random.multivariate_normal((mean_x, mean_y), cov=[[sig, 0.0], [0.0, sig]], size=n_data)), axis=0)
+                    self.data = np.concatenate((self.data, np.random.multivariate_normal((mean_x, mean_y), cov=[[sig**2, 0.0], [0.0, sig**2]], size=n_data)), axis=0)
 
         self.out_dim = 2
         self.n_data = self.data.shape[0]
