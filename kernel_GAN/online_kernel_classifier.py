@@ -1,14 +1,15 @@
 import torch
+from torch import nn, optim
+import model.model_DCGAN as model_DCGAN
 
 batch_size_train = 128
 batch_size_test = 1000
 log_interval = 10
 
 class KernelClassifier:
-    def __init__(self,dim,kernel='gaussian',gamma=1.0,budget=512,
-                 lmbda=1.0,eta=0.01, margin=1.0, degree=3, coef0=0.0, device=torch.device("cuda"), lossfn = 'logistic'):
+    def __init__(self,dim,kernel='gaussian',gamma=1.0, gamma_ratio=1.002, budget=512,
+                 lmbda=1.0,eta=0.01, margin=1.0, degree=3, coef0=0.0, alpha=0.5, lr=5e-4, img_size=32, use_gpu=True, lossfn = 'logistic', data_type='gaussian2dgrid'):
         self.lossfn = lossfn
-        self.device = device
         self.kern=kernel
         self.budget = budget
         self.lmbda = lmbda
@@ -16,12 +17,37 @@ class KernelClassifier:
         self.margin = margin
         self.dim = dim
         self.gamma = gamma
+        self.gamma_ratio = gamma_ratio
         self.degree = degree
         self.coef0 = coef0
+        self.alpha = alpha
+        self.lr = lr
+        self.img_size = img_size
+        self.use_gpu = use_gpu
+        self.data_type = data_type
+        self.device = torch.device("cuda" if self.use_gpu and torch.cuda.is_available() else "cpu")
         self.alphas = torch.zeros(self.budget,device=self.device)
-        self.keypoints = torch.zeros(self.budget,self.dim,device=self.device)
+        if self.data_type == 'gaussian2dgrid' or self.data_type == 'mnist':
+            self.keypoints = torch.zeros(self.budget,self.dim, device=self.device)
+        else:
+            self.keypoints = torch.zeros((self.budget, 3, self.img_size, self.img_size), device=self.device)
         self.pointer = 0
         self.offset = 0.0
+        
+        if self.data_type == 'gaussian2dgrid':
+            self.z_size = 2
+        else:
+            self.z_size = 100
+        
+        if self.data_type == 'svhn':
+            self.encoder = model_DCGAN.encoder_svhn(z_size=self.z_size)
+            self.e_optimizer = optim.Adam(self.encoder.parameters(), lr=self.lr, betas=(0.5, 0.999))
+            self.encoder.to(self.device)
+    
+    
+    def gamma_update(self):
+        
+        self.gamma *= self.gamma_ratio
     
     
     def kernel(self,X):
@@ -31,12 +57,17 @@ class KernelClassifier:
             return self.kernel_gaussian(X)
         elif self.kern == 'poly':
             return self.kernel_poly(X)
+        elif self.kern == 'rq':
+            return self.kernel_rq(X)
         else:
             raise Exception('No kernel specified')
       
     
     def kernel_gaussian(self,X):
         Z = self.keypoints
+        if self.data_type == 'svhn':
+            X = self.encoder(X)
+            Z = self.encoder(Z)
         Xnorms = (X*X).sum(dim=1)
         Znorms = (Z*Z).sum(dim=1)
         onesn = torch.ones(X.shape[0],device=self.device)
@@ -47,13 +78,32 @@ class KernelClassifier:
 
     def kernel_linear(self,X):
         Z = self.keypoints
+        if self.data_type == 'svhn':
+            X = self.encoder(X)
+            Z = self.encoder(Z)
         return X @ Z.T 
     
     
     def kernel_poly(self, X):
         Z = self.keypoints
+        if self.data_type == 'svhn':
+            X = self.encoder(X)
+            Z = self.encoder(Z)
         return (self.gamma * X @ Z.T + self.coef0)**self.degree
-        
+    
+    
+    def kernel_rq(self, X): #rational quadratic
+        Z = self.keypoints
+        if self.data_type == 'svhn':
+            X = self.encoder(X)
+            Z = self.encoder(Z)
+        Xnorms = (X*X).sum(dim=1)
+        Znorms = (Z*Z).sum(dim=1)
+        onesn = torch.ones(X.shape[0],device=self.device)
+        onesk = torch.ones(Z.shape[0],device=self.device)
+        M = torch.ger(Xnorms,onesk) + torch.ger(onesn,Znorms) - 2 * (X @ Z.T)
+        return (1+M/(2*self.alpha))**(-self.alpha)
+    
         
     def funceval(self,X):
         kernel_vals = self.kernel(X)
@@ -68,8 +118,9 @@ class KernelClassifier:
     
     def predict_proba(self,X):
         vals = self.funceval(X)
-        expnegtwovals = torch.exp(-vals)
-        probs = 1/(1 + expnegtwovals)
+        #expnegtwovals = torch.exp(-vals)
+        #probs = 1/(1 + expnegtwovals)
+        probs = torch.sigmoid(-vals)
         if torch.isnan(probs).any():
             print(probs)
             print(vals)
@@ -85,7 +136,32 @@ class KernelClassifier:
     def error(self,X,Y):
         signs = torch.sign(self.funceval(X) * Y)
         return torch.mean(1 - signs)/2
+    
+    
+    def train_encoder(self, real_data, fake_data):
+        # Reset gradients
+        self.e_optimizer.zero_grad()
+        # Sample noise and generate fake data
+        #start = time.time()
+        prediction_real = self.funceval(real_data)
+        prediction_fake = self.funceval(fake_data)
+        prediction_real = prediction_real.reshape(-1, 1)
+        prediction_fake = prediction_fake.reshape(-1, 1)
+        if self.use_gpu and torch.cuda.is_available():
+            prediction_real = prediction_real.cuda()
+            prediction_fake = prediction_fake.cuda()
+        #print('spent time for getting D when training encoder is {}'.format(time.time()-start))
+        # Calculate error and backpropagate
+        error = (nn.ReLU()(1.0 - prediction_real) + nn.ReLU()(1.0 + prediction_fake)).mean() #hinge loss
 
+        #start = time.time()
+        error.backward()
+        #print('spent time for backpropagation when training encoder is {}'.format(time.time()-start))
+        # Update weights with gradients
+        self.e_optimizer.step()
+        # Return error
+        return error
+    
     
     def train(self,train_loader,test_loader=False,num_epochs=5):
         train_losses = []
@@ -94,6 +170,8 @@ class KernelClassifier:
         for epoch in range(1,num_epochs+1):           
             for batch_idx, (data, target) in enumerate(train_loader):
                 data, target = data.to(self.device), target.to(self.device).long()
+                #print(data.shape)
+                #print(target.shape)
                 self.update(data,target)
                 '''
                 if batch_idx % log_interval == 0:
@@ -125,7 +203,8 @@ class KernelClassifier:
     def losses(self,X,Y):
         vals = self.funceval(X)
         if self.lossfn == 'logistic':
-            lss = torch.log(1 + torch.exp(-Y*vals))
+            #lss = torch.log(1 + torch.exp(-Y*vals))
+            lss = -torch.log(torch.sigmoid(-Y*vals))
         elif self.lossfn == 'hinge':
             zeros = torch.zeros(len(Y), device=self.device)
             lss_vals = self.margin - Y*vals
@@ -147,12 +226,16 @@ class KernelClassifier:
         
         if self.lossfn == 'logistic':
             
-            newalphas = self.eta * Y * torch.exp(-funcvals*Y) / (1 + torch.exp(-funcvals*Y))
+            newalphas = self.eta * Y * torch.sigmoid(-funcvals*Y)
+            #newalphas = self.eta * Y * torch.exp(-funcvals*Y) / (1 + torch.exp(-funcvals*Y))
             #newalphas =   self.eta * ((Y + 1)/2 - self.predict_proba(X))
-            newkeypoints = X
             
-            self.offset += self.eta * (Y * torch.exp(-funcvals*Y) / (1 + torch.exp(-funcvals*Y))).mean()
+            self.offset += self.eta * (Y * torch.sigmoid(-funcvals*Y)).mean()
+            #self.offset += self.eta * (Y * torch.exp(-funcvals*Y) / (1 + torch.exp(-funcvals*Y))).mean()
             #self.offset += self.eta * ((Y + 1)/2 - self.predict_proba(X)).mean()
+            if self.data_type == 'svhn':
+                newalphas = newalphas.detach()
+                self.offset = self.offset.detach()
 
             if verbose:
                 print(self.predict_proba(X))
@@ -170,9 +253,12 @@ class KernelClassifier:
             """
             sigma = torch.where(Y*funcvals<=self.margin, torch.ones(1, device=self.device), torch.zeros(1, device=self.device))
             newalphas = self.eta * sigma * Y  
-            newkeypoints = X
             
             self.offset += self.eta * (sigma * Y).mean()
+            
+            if self.data_type == 'svhn':
+                newalphas = newalphas.detach()
+                self.offset = self.offset.detach()
         
         
         self._insert_keypoints_alphas(X,newalphas)
@@ -208,7 +294,8 @@ class KernelClassifier:
             segments = [(a_start, a_end, b_start, b_end)]
             newpointer = a_end if a_end < self.budget else 0
         for a_start, a_end, b_start, b_end in segments:
-            self.keypoints[a_start:a_end,:] = newkeypoints[b_start:b_end,:]
+            #self.keypoints[a_start:a_end,:] = newkeypoints[b_start:b_end,:]
+            self.keypoints[a_start:a_end] = newkeypoints[b_start:b_end]
             self.alphas[a_start:a_end] = newalphas[b_start:b_end]
 
         self.pointer = newpointer
