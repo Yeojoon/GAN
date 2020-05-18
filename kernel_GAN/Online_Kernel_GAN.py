@@ -7,7 +7,7 @@ from tqdm import tqdm
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from online_kernel_classifier_v2_with_encoder import KernelClassifier
+from online_kernel_classifier import KernelClassifier
 import model.model_kernel_gaussian2d_from_PacGAN as model_gaussian2d
 import model.model_kernel_mnist as model_mnist_VGAN
 import model.model_DCGAN as model_DCGAN
