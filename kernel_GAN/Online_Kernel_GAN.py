@@ -7,10 +7,10 @@ from tqdm import tqdm
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from online_kernel_classifier import KernelClassifier
+from online_kernel_classifier_v2_with_encoder import KernelClassifier
 import model.model_kernel_gaussian2d_from_PacGAN as model_gaussian2d
 import model.model_kernel_mnist as model_mnist_VGAN
-import model.model_DCGAN as model_mnist_DCGAN
+import model.model_DCGAN as model_DCGAN
 from quantitative_metric import mode_collapse_metric
 from sklearn.svm import SVC
 from data.gaussianGridDataset import gaussianGridDataset
@@ -21,7 +21,7 @@ import os
 
 
 class Online_Kernel_GAN(object):
-    def __init__(self, kernel='gaussian', lr=5e-4, lr_gamma=1, gamma=0.5, gamma_ratio=1.0, lmbda=0.1, eta=0.05, budget=2048, coef0=0.0, degree=3, lossfn='logistic', g_steps=5, num_epochs=1000, n_data=100, batch_size=100, img_size=28, use_gpu=True, data=gaussianGridDataset(n=5, n_data=100, sig=0.05), data_type='gaussian2dgrid', model_type='VGAN'):
+    def __init__(self, kernel='gaussian', lr=5e-4, lr_gamma=1, gamma=0.5, gamma_ratio=1.0, lmbda=0.1, eta=0.05, budget=2048, coef0=0.0, degree=3, alpha=0.5, lossfn='logistic', g_steps=5, e_steps=1, num_epochs=1000, n_data=100, batch_size=500, img_size=28, use_gpu=True, data=gaussianGridDataset(n=5, n_data=100, sig=0.05), data_type='gaussian2dgrid', model_type='VGAN'):
         self.kernel = kernel
         self.lr = lr
         self.lr_gamma = lr_gamma
@@ -32,8 +32,10 @@ class Online_Kernel_GAN(object):
         self.budget = budget
         self.coef0 = coef0
         self.degree = degree
+        self.alpha = alpha
         self.lossfn = lossfn
         self.g_steps = g_steps
+        self.e_steps = e_steps
         self.num_epochs = num_epochs
         self.batch_size = batch_size
         self.img_size = img_size
@@ -49,12 +51,20 @@ class Online_Kernel_GAN(object):
         self.data_loader = torch.utils.data.DataLoader(self.data, batch_size=self.batch_size, shuffle=True)
         self.data_type = data_type
         self.model_type = model_type
+        
+        if self.data_type == 'gaussian2dgrid':
+            self.z_size = 2
+        else:
+            self.z_size = 100
+        
         self.device = torch.device("cuda" if self.use_gpu and torch.cuda.is_available() else "cpu")
         
         if self.data_type == 'gaussian2dgrid':
             self.dim = 2
         elif self.data_type == 'mnist':
             self.dim = self.img_size**2
+        else:
+            self.dim = 3 * self.img_size**2
         
         if self.data_type == 'gaussian2dgrid':
             self.generator = model_gaussian2d.GeneratorNet()
@@ -62,13 +72,19 @@ class Online_Kernel_GAN(object):
             if self.model_type == 'VGAN':
                 self.generator = model_mnist_VGAN.GeneratorNet()
             elif self.model_type == 'DCGAN':
-                self.generator = model_mnist_DCGAN.generator()
+                self.generator = model_DCGAN.generator_mnist()
+        elif self.data_type == 'svhn':
+            if self.model_type == 'DCGAN':
+                self.generator = model_DCGAN.generator_svhn(z_size=self.z_size)
             
-        self.g_optimizer = optim.Adam(self.generator.parameters(), lr=self.lr)
+        if self.model_type == 'DCGAN':
+            self.g_optimizer = optim.Adam(self.generator.parameters(), lr=self.lr, betas=(0.5, 0.999))
+        else:
+            self.g_optimizer = optim.Adam(self.generator.parameters(), lr=self.lr)
         self.scheduler_g = optim.lr_scheduler.ExponentialLR(self.g_optimizer, gamma=self.lr_gamma)
         self.generator.to(self.device)
         
-        self.clf = KernelClassifier(dim=self.dim, kernel=self.kernel, gamma=self.gamma, lmbda=self.lmbda, eta=self.eta, budget=self.budget, device=self.device, lossfn=self.lossfn)
+        self.clf = KernelClassifier(dim=self.dim, kernel=self.kernel, gamma=self.gamma, gamma_ratio=self.gamma_ratio, alpha=self.alpha, lmbda=self.lmbda, eta=self.eta, budget=self.budget, lr=self.lr, img_size=self.img_size, use_gpu=self.use_gpu, lossfn=self.lossfn, data_type=self.data_type)
         
         
     def images_to_vectors(self, images):
@@ -80,13 +96,10 @@ class Online_Kernel_GAN(object):
     
     
     def noise(self, size):
-        if self.data_type == 'gaussian2dgrid':
-            n = torch.randn((size, 2), device=self.device)
-        elif self.data_type == 'mnist':
-            if self.model_type == 'VGAN':
-                n = torch.randn((size, 100), device=self.device)
-            elif self.model_type == 'DCGAN':
-                n = torch.randn((size, 100), device=self.device).view(-1, 100, 1, 1)
+        if self.data_type == 'mnist' and self.model_type == 'DCGAN':
+            n = torch.randn((size, self.z_size), device=self.device).view(-1, self.z_size, 1, 1)
+        else:
+            n = torch.randn((size, self.z_size), device=self.device)
         return n
 
 
@@ -106,7 +119,7 @@ class Online_Kernel_GAN(object):
         return data
 
 
-    def make_2d_dataset(self, X, y, batch_size=64):
+    def make_dataset(self, X, y, batch_size=64):
  
         dataset = torch.utils.data.TensorDataset(X, y)
         loader = torch.utils.data.DataLoader(dataset,batch_size=batch_size,shuffle=True)
@@ -122,52 +135,19 @@ class Online_Kernel_GAN(object):
         y_fake = self.fake_data_target(N)
         y = torch.cat((y_true, y_fake), 0)
 
-        train_dataset = self.make_2d_dataset(data, y)
+        train_dataset = self.make_dataset(data, y)
 
         self.clf.train(train_dataset, num_epochs=3)
 
     
-    def kernel_func(self, X, Z):
-        if self.kernel == 'gaussian':
-            return self.kernel_gaussian(X, Z)
-        elif self.kernel == 'poly':
-            return self.kernel_poly(X, Z)
-        else:
-            raise Exception('No kernel specified')
-    
-
-    def kernel_gaussian(self, X, Z):
-
-        Xnorms = (X*X).sum(dim=1)
-        Znorms = (Z*Z).sum(dim=1)
-        onesn = torch.ones(X.shape[0], device=self.device)
-        onesk = torch.ones(Z.shape[0], device=self.device)
-        M = torch.ger(Xnorms,onesk) + torch.ger(onesn,Znorms) - 2 * (X @ Z.T)
-
-        return torch.exp(-self.gamma*M)
-
-    
-    def kernel_poly(self, X, Z):
-        
-        return (self.gamma * X @ Z.T + self.coef0)**self.degree
-    
-
     def exp(self, x, y, data):
 
         return torch.exp(-self.gamma*((x-data[0])**2 + (y-data[1])**2))
     
     
     def discriminator(self, x):
-
-        alpha = self.clf.alphas.type(torch.FloatTensor)
-        rho = self.clf.offset.type(torch.FloatTensor)
-        key_vecs = self.clf.keypoints.type(torch.FloatTensor)
-        if self.use_gpu and torch.cuda.is_available():
-            alpha = alpha.cuda()
-            rho = rho.cuda()
-            key_vecs = key_vecs.cuda()
-
-        D = self.kernel_func(x, key_vecs) @ alpha + rho
+        
+        D = self.clf.funceval(x)
 
         return D
 
@@ -257,10 +237,13 @@ class Online_Kernel_GAN(object):
         print('The mode dictionary is', mode_counter)
 
         
-    def evaluate_mnist(self, epoch):
+    def evaluate_image(self, epoch):
 
         samples = self.generator(self.noise(64)).cpu().data.numpy()
-        samples = samples.reshape(64, self.img_size, self.img_size)
+        if self.data_type == 'mnist':
+            samples = samples.reshape(64, self.img_size, self.img_size)
+        elif self.data_type == 'svhn':
+            samples = samples.reshape(64, 3, self.img_size, self.img_size)
 
         fig = plt.figure(figsize=(8, 8))
         gs = gridspec.GridSpec(8, 8)
@@ -272,14 +255,25 @@ class Online_Kernel_GAN(object):
             ax.set_xticklabels([])
             ax.set_yticklabels([])
             ax.set_aspect('equal')
-            plt.imshow(sample, cmap='gray')
+            if self.data_type == 'mnist':
+                plt.imshow(sample, cmap='gray')
+            else:
+                sample = np.transpose(sample, (1, 2, 0))
+                sample = ((sample +1)*255 / (2)).astype(np.uint8)
+                plt.imshow(sample.reshape(self.img_size, self.img_size, 3))
 
         if not os.path.exists('out_image/'):
             os.makedirs('out_image/')
-        if not os.path.exists('out_image/out_mnist_online_kernel'):
-            os.makedirs('out_image/out_mnist_online_kernel')
+        if self.data_type == 'mnist':
+            if not os.path.exists('out_image/out_mnist_online_kernel'):
+                os.makedirs('out_image/out_mnist_online_kernel')
 
-        plt.savefig('out_image/out_mnist_online_kernel/{}.png'.format(str(epoch).zfill(3)), bbox_inches='tight')
+            plt.savefig('out_image/out_mnist_online_kernel/{}.png'.format(str(epoch).zfill(3)), bbox_inches='tight')
+        elif self.data_type == 'svhn':
+            if not os.path.exists('out_image/out_svhn_online_kernel'):
+                os.makedirs('out_image/out_svhn_online_kernel')
+
+            plt.savefig('out_image/out_svhn_online_kernel/{}.png'.format(str(epoch).zfill(3)), bbox_inches='tight')
         plt.close(fig)
         
         
@@ -289,46 +283,42 @@ class Online_Kernel_GAN(object):
             epoch_start = time.time()
 
             for n_batch, (real_batch) in enumerate(tqdm(self.data_loader)):
-                if self.data_type == 'mnist':
-                    real_batch = real_batch[0] # real_batch is tuple for mnist (data, target)
-                # 1. Train Discriminator
-                if n_batch % self.g_steps == 0:
-                    if n_batch == 0 and epoch == 0:
-                        if self.data_type == 'gaussian2dgrid':
-                            real_g_data = self.data.data[:self.g_steps*len(real_batch)]
-                            real_g_data = torch.from_numpy(real_g_data).type(torch.FloatTensor)
-                        elif self.data_type == 'mnist':
-                            real_g_data = self.images_to_vectors(real_batch)
-                    if self.use_gpu and torch.cuda.is_available():
-                        real_g_data = real_g_data.cuda()
+                if self.data_type is not 'gaussian2dgrid':
+                    real_batch = real_batch[0] # real_batch is tuple for mnist, svhn, ... (data, target)
                     
-                    if self.model_type == 'DCGAN':
-                        fake_g_data = self.images_to_vectors(self.generator(self.noise(real_g_data.size(0))).detach())
-                    else:
-                        fake_g_data = self.generator(self.noise(real_g_data.size(0))).detach()
-                    #start = time.time()
-                    self.online_kernel(real_g_data, fake_g_data)
-                    #print('spent time for getting SVM is {}'.format(time.time()-start))
-                    real_g_data = torch.zeros((self.g_steps*len(real_batch), len(real_g_data[0])), device=self.device)
-
-                k = n_batch % self.g_steps
                 if self.data_type == 'gaussian2dgrid':
                     real_data = real_batch.type(torch.FloatTensor)
                 elif self.data_type == 'mnist':
                     real_data = self.images_to_vectors(real_batch)
+                else:
+                    real_data = real_batch
                     
                 if self.use_gpu and torch.cuda.is_available(): 
                     real_data = real_data.cuda()
-                real_g_data[k*len(real_batch):(k+1)*len(real_batch)] = real_data
-
+                    
+                if self.model_type == 'DCGAN' and self.data_type == 'mnist':
+                    fake_data = self.images_to_vectors(self.generator(self.noise(real_data.size(0))).detach())
+                else:
+                    fake_data = self.generator(self.noise(real_data.size(0))).detach()
+                    
+                if self.data_type == 'svhn' and (epoch != 0 or n_batch != 0):
+                    for i in range(self.e_steps):
+                        fake_data = self.generator(self.noise(real_data.size(0))).detach()
+                        e_error = self.clf.train_encoder(real_data, fake_data)
+                #start = time.time()   
+                #print(real_data.shape)
+                #print(fake_data.shape)
+                self.online_kernel(real_data, fake_data)
+                #print('spent time for SVM is {}'.format(time.time() - start))
                 # 2. Train Generator
                 # Generate fake data
-                if self.model_type == 'DCGAN':
-                    fake_data = self.images_to_vectors(self.generator(self.noise(real_data.size(0))))
-                else:
-                    fake_data = self.generator(self.noise(real_data.size(0)))
-                # Train G
-                g_error = self.train_generator(self.g_optimizer, fake_data)
+                for i in range(self.g_steps):
+                    if self.model_type == 'DCGAN' and self.data_type == 'mnist':
+                        fake_data = self.images_to_vectors(self.generator(self.noise(real_data.size(0))))
+                    else:
+                        fake_data = self.generator(self.noise(real_data.size(0)))
+                    # Train G
+                    g_error = self.train_generator(self.g_optimizer, fake_data)
 
             self.scheduler_g.step()
             if not os.path.exists('checkpoint/'):
@@ -338,16 +328,22 @@ class Online_Kernel_GAN(object):
                 checkpoint_folder = 'checkpoint/checkpoint_gaussian2dgrid_online_kernel'
             elif self.data_type == 'mnist':
                 checkpoint_folder = 'checkpoint/checkpoint_mnist_online_kernel'
+            elif self.data_type == 'svhn':
+                checkpoint_folder = 'checkpoint/checkpoint_svhn'
                 
             if not os.path.exists(checkpoint_folder):
                 os.makedirs(checkpoint_folder)
             torch.save(self.generator.state_dict(), os.path.join(checkpoint_folder, 'gen_{}'.format(str(epoch).zfill(3))))
             print('spent time for epoch {} is {}s'.format(epoch, time.time()-epoch_start))
-            print('epoch # :', epoch, 'gamma :', self.gamma, 'gen loss :', g_error.item())
+            if self.data_type == 'svhn':
+                print('epoch # :', epoch, 'gamma :', self.clf.gamma, 'gen loss :', g_error.item(), 'encoder loss :', e_error.item())
+            else:
+                print('epoch # :', epoch, 'gamma :', self.clf.gamma, 'gen loss :', g_error.item())
             
             if self.data_type == 'gaussian2dgrid':
                 self.evaluate_gaussian2d(epoch)
-            elif self.data_type == 'mnist':
-                self.evaluate_mnist(epoch)
+            else:
+                self.evaluate_image(epoch)
                 
-            self.gamma *= self.gamma_ratio
+            if self.data_type == 'gaussian2dgrid':
+                self.clf.gamma_update()
