@@ -28,3 +28,4 @@
 - Approximation and Convergence Properties of Generative Adversarial Learning(NIPS 2017) [[Paper]](https://arxiv.org/abs/1705.08991)
 - Do GANs Learn the Distribution? Some Theory and Empirics(ICLR 2018) [[Paper]](https://openreview.net/pdf?id=BJehNfW0-)
 - On the Discrimination-Generalization Tradeoff in GANs(ICLR 2018) [[Paper]](https://arxiv.org/abs/1711.02771)
+- Approximability of Discriminators Implies Diversity in GANs(ICLR 2019) [[Paper]](https://arxiv.org/abs/1806.10586)
