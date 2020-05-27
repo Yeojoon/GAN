@@ -46,7 +46,7 @@ def noise(size):
 
 generator = model.GeneratorNet()
 if torch.cuda.is_available():
-    generator.cuda()
+    generator = generator.cuda()
     
     
 # Optimizers
@@ -57,7 +57,10 @@ scheduler_g = optim.lr_scheduler.ExponentialLR(g_optimizer, gamma=1)
 # Number of steps to apply to the discriminator
 g_steps = 5  # In Goodfellow et. al 2014 this variable is assigned to 1
 # Number of epochs
-num_epochs = 1000
+num_epochs = 2000
+
+gamma = 0.2
+gamma_scale_rate = 1.001
 
 
 def real_data_target(size):
@@ -78,7 +81,7 @@ def fake_data_target(size):
     return data
 
 
-def SVM_with_kernel(real_data, fake_data):
+def SVM_with_kernel(real_data, fake_data, gamma):
     
     N = len(real_data)
     data = torch.cat((real_data, fake_data), axis=0)
@@ -89,7 +92,7 @@ def SVM_with_kernel(real_data, fake_data):
     
     X = data.cpu().detach().numpy()
     y = y.cpu().detach().numpy().reshape(-1)
-    gamma = 1/len(real_data[0])
+    #gamma = 1/len(real_data[0])
     
     clf = SVC(gamma=gamma)
     clf.fit(X, y)
@@ -97,7 +100,7 @@ def SVM_with_kernel(real_data, fake_data):
     rho = clf.intercept_
     support_vecs = clf.support_vectors_
     
-    return alpha, rho, support_vecs, gamma
+    return alpha, rho, support_vecs
 
 
 def exp(x, y, data, variance, gamma):
@@ -206,7 +209,7 @@ for epoch in range(num_epochs):
                 real_g_data = real_g_data.cuda()
             fake_g_data = generator(noise(real_g_data.size(0))).detach()
             #start = time.time()
-            alpha, rho, support_vecs, gamma = SVM_with_kernel(real_g_data, fake_g_data)
+            alpha, rho, support_vecs = SVM_with_kernel(real_g_data, fake_g_data, gamma)
             #print('spent time for getting SVM is {}'.format(time.time()-start))
             real_g_data = torch.zeros(g_steps*len(real_batch), len(real_batch[0]))
         
@@ -242,9 +245,6 @@ for epoch in range(num_epochs):
         plt.close(fig)
         '''
     
-    scheduler_g.step()
-    torch.save(generator.state_dict(), os.path.join(args.checkpoint_dir, 'gen_{}'.format(str(epoch).zfill(3))))
-    
     if epoch % 1 == 0:
         #start = time.time()
         X, Y = np.meshgrid(np.linspace(-8, 8, 50), np.linspace(-8, 8, 50))
@@ -261,7 +261,7 @@ for epoch in range(num_epochs):
         fig, ax = plt.subplots()
         CS = ax.contour(X, Y, Z)
         ax.clabel(CS, inline=1, fontsize=10)
-        fig.suptitle('2d ring at epoch {}'.format(epoch))
+        fig.suptitle('2d ring at epoch {} with gamma {}'.format(epoch, gamma))
         ax.scatter(real_t_data[:,0], real_t_data[:,1], marker='*')
         plt.axis('equal')
         ax.scatter(fake_t_data[:,0], fake_t_data[:,1], marker='.')
@@ -275,3 +275,15 @@ for epoch in range(num_epochs):
         #print('spent time for drawing graph is {}'.format(time.time()-start))
         
         print('epoch # :', epoch, 'gen loss :', g_error.item())
+
+    gamma *= gamma_scale_rate
+    scheduler_g.step()
+    torch.save(generator.state_dict(), os.path.join(args.checkpoint_dir, 'gen_{}'.format(str(epoch).zfill(3))))
+
+final_samples = generator(noise(2500)).cpu().detach().numpy()
+#print('# ',(np.linalg.norm(final_samples, axis=1) < 3 * data.sig ** 0.5).sum())
+quantitative_results = data.format_metric(final_samples)
+with open(os.path.join(save_dir, 'quantitative.txt'), 'w') as f:
+    for key, val in quantitative_results.items():
+        print('{}: {}'.format(key, val))
+        f.write('{}: {}\n'.format(key, val))
