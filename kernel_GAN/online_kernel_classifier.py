@@ -8,7 +8,7 @@ log_interval = 10
 
 class KernelClassifier:
     def __init__(self,dim,kernel='gaussian',gamma=1.0, gamma_ratio=1.002, budget=512,
-                 lmbda=1.0,eta=0.01, margin=1.0, degree=3, coef0=0.0, alpha=0.5, lr=5e-4, img_size=32, use_gpu=True, lossfn = 'logistic', data_type='gaussian2dgrid'):
+                 lmbda=1.0,eta=0.01, margin=1.0, degree=3, coef0=0.0, alpha=0.5, lr=5e-4, img_size=32, use_gpu=True, lossfn = 'logistic', data_type='gaussian2dgrid', model_type='VGAN'):
         self.lossfn = lossfn
         self.kern=kernel
         self.budget = budget
@@ -16,21 +16,25 @@ class KernelClassifier:
         self.eta = eta
         self.margin = margin
         self.dim = dim
-        self.gamma = gamma
+        self.use_gpu = use_gpu
+        self.gamma = (gamma.cuda() if self.use_gpu and torch.cuda.is_available() and torch.is_tensor(gamma) else gamma) 
         self.gamma_ratio = gamma_ratio
         self.degree = degree
         self.coef0 = coef0
-        self.alpha = alpha
+        self.alpha = (alpha.cuda() if self.use_gpu and torch.cuda.is_available() and torch.is_tensor(alpha) else alpha)
         self.lr = lr
         self.img_size = img_size
-        self.use_gpu = use_gpu
         self.data_type = data_type
+        self.model_type = model_type
         self.device = torch.device("cuda" if self.use_gpu and torch.cuda.is_available() else "cpu")
         self.alphas = torch.zeros(self.budget,device=self.device)
-        if self.data_type == 'gaussian2dgrid' or self.data_type == 'mnist':
+        if self.model_type == 'VGAN':
             self.keypoints = torch.zeros(self.budget,self.dim, device=self.device)
         else:
-            self.keypoints = torch.zeros((self.budget, 3, self.img_size, self.img_size), device=self.device)
+            if self.data_type == 'mnist':
+                self.keypoints = torch.zeros((self.budget, 1, self.img_size, self.img_size), device=self.device)
+            else:
+                self.keypoints = torch.zeros((self.budget, 3, self.img_size, self.img_size), device=self.device)
         self.pointer = 0
         self.offset = 0.0
         
@@ -39,8 +43,15 @@ class KernelClassifier:
         else:
             self.z_size = 100
         
-        if self.data_type == 'svhn':
-            self.encoder = model_DCGAN.encoder_svhn(z_size=self.z_size)
+        if self.model_type == 'DCGAN':
+            if self.data_type == 'mnist':
+                self.encoder = model_DCGAN.encoder_mnist(z_size=self.z_size)
+                #self.encoder.apply(model_DCGAN.weights_init)
+            elif self.data_type == 'svhn':
+                self.encoder = model_DCGAN.encoder_svhn(z_size=self.z_size)
+            elif self.data_type == 'celeba':
+                self.encoder = model_DCGAN.encoder_celeba(z_size=self.z_size)
+                self.encoder.apply(model_DCGAN.weights_init)
             self.e_optimizer = optim.Adam(self.encoder.parameters(), lr=self.lr, betas=(0.5, 0.999))
             self.encoder.to(self.device)
     
@@ -54,18 +65,22 @@ class KernelClassifier:
         if self.kern == 'linear':
             return self.kernel_linear(X)
         elif self.kern == 'gaussian':
-            return self.kernel_gaussian(X)
+            return self.kernel_gaussian(X, self.gamma)
         elif self.kern == 'poly':
-            return self.kernel_poly(X)
+            return self.kernel_poly(X, self.gamma)
         elif self.kern == 'rq':
-            return self.kernel_rq(X)
+            return self.kernel_rq(X, self.alpha)
+        elif self.kern == 'mixed_gaussian':
+            return self.kernel_mixed_gaussian(X)
+        elif self.kern == 'mixed_rq_linear':
+            return self.kernel_mixed_rq_linear(X)
         else:
             raise Exception('No kernel specified')
       
     
-    def kernel_gaussian(self,X):
+    def kernel_gaussian(self,X, gamma):
         Z = self.keypoints
-        if self.data_type == 'svhn':
+        if self.model_type == 'DCGAN':
             X = self.encoder(X)
             Z = self.encoder(Z)
         Xnorms = (X*X).sum(dim=1)
@@ -73,28 +88,32 @@ class KernelClassifier:
         onesn = torch.ones(X.shape[0],device=self.device)
         onesk = torch.ones(Z.shape[0],device=self.device)
         M = torch.ger(Xnorms,onesk) + torch.ger(onesn,Znorms) - 2 * (X @ Z.T)
-        return torch.exp(-self.gamma*M)
+        if self.kern == 'mixed_gaussian':
+            row, col = M.shape
+            M = M.reshape(row, col, 1)
+            return torch.exp(-gamma*M)
+        return torch.exp(-gamma*M)
 
 
     def kernel_linear(self,X):
         Z = self.keypoints
-        if self.data_type == 'svhn':
+        if self.model_type == 'DCGAN':
             X = self.encoder(X)
             Z = self.encoder(Z)
         return X @ Z.T 
     
     
-    def kernel_poly(self, X):
+    def kernel_poly(self, X, gamma):
         Z = self.keypoints
-        if self.data_type == 'svhn':
+        if self.model_type == 'DCGAN':
             X = self.encoder(X)
             Z = self.encoder(Z)
-        return (self.gamma * X @ Z.T + self.coef0)**self.degree
+        return (gamma * X @ Z.T + self.coef0)**self.degree
     
     
-    def kernel_rq(self, X): #rational quadratic
+    def kernel_rq(self, X, alpha): #rational quadratic
         Z = self.keypoints
-        if self.data_type == 'svhn':
+        if self.model_type == 'DCGAN':
             X = self.encoder(X)
             Z = self.encoder(Z)
         Xnorms = (X*X).sum(dim=1)
@@ -102,9 +121,23 @@ class KernelClassifier:
         onesn = torch.ones(X.shape[0],device=self.device)
         onesk = torch.ones(Z.shape[0],device=self.device)
         M = torch.ger(Xnorms,onesk) + torch.ger(onesn,Znorms) - 2 * (X @ Z.T)
-        return (1+M/(2*self.alpha))**(-self.alpha)
+        if self.kern == 'mixed_rq_linear':
+            row, col = M.shape
+            M = M.reshape(row, col, 1)
+            return (1+M/(2*alpha))**(-alpha)
+        return (1+M/(2*alpha))**(-alpha)
     
+    
+    def kernel_mixed_gaussian(self, X):
+        kernel_vals = self.kernel_gaussian(X, self.gamma)
+        return kernel_vals.sum(dim=2)
+    
+    
+    def kernel_mixed_rq_linear(self, X):
+        kernel_vals = self.kernel_rq(X, self.alpha).sum(dim=2) + self.kernel_linear(X)
+        return kernel_vals
         
+    
     def funceval(self,X):
         kernel_vals = self.kernel(X)
 #         print(kernel_vals)
@@ -233,7 +266,7 @@ class KernelClassifier:
             self.offset += self.eta * (Y * torch.sigmoid(-funcvals*Y)).mean()
             #self.offset += self.eta * (Y * torch.exp(-funcvals*Y) / (1 + torch.exp(-funcvals*Y))).mean()
             #self.offset += self.eta * ((Y + 1)/2 - self.predict_proba(X)).mean()
-            if self.data_type == 'svhn':
+            if self.model_type == 'DCGAN':
                 newalphas = newalphas.detach()
                 self.offset = self.offset.detach()
 
@@ -256,7 +289,7 @@ class KernelClassifier:
             
             self.offset += self.eta * (sigma * Y).mean()
             
-            if self.data_type == 'svhn':
+            if self.model_type == 'DCGAN':
                 newalphas = newalphas.detach()
                 self.offset = self.offset.detach()
         
