@@ -11,8 +11,8 @@ from online_kernel_classifier import KernelClassifier
 import model.model_kernel_gaussian2d_from_PacGAN as model_gaussian2d
 import model.model_kernel_mnist as model_mnist_VGAN
 import model.model_DCGAN as model_DCGAN
-from quantitative_metric import mode_collapse_metric
-from data.gaussianGridDataset import gaussianGridDataset
+from sklearn.svm import SVC
+from data.SyntheticDataset import gaussianGridDataset, ringDataset, circleDataset
 import time
 
 import os
@@ -20,7 +20,7 @@ import os
 
 
 class Online_Kernel_GAN(object):
-    def __init__(self, kernel='gaussian', lr=5e-4, lr_gamma=1, gamma=0.5, gamma_ratio=1.0, lmbda=0.1, eta=0.05, budget=2048, coef0=0.0, degree=3, alpha=0.5, lossfn='logistic', g_steps=5, e_steps=1, num_epochs=1000, n_data=100, batch_size=500, img_size=28, use_gpu=True, data=gaussianGridDataset(n=5, n_data=100, sig=0.05), data_type='gaussian2dgrid', model_type='VGAN'):
+    def __init__(self, kernel='gaussian', lr=5e-4, lr_gamma=1, gamma=0.5, gamma_ratio=1.0, lmbda=0.1, eta=0.05, budget=2048, coef0=0.0, degree=3, alpha=0.5, lossfn='logistic', g_steps=5, e_steps=1, num_epochs=1000, batch_size=500, img_size=28, use_gpu=True, data=gaussianGridDataset(n=5, n_data=100, sig=0.05), data_type='gaussian2dgrid', model_type='VGAN'):
         self.kernel = kernel
         self.lr = lr
         self.lr_gamma = lr_gamma
@@ -39,12 +39,6 @@ class Online_Kernel_GAN(object):
         self.batch_size = batch_size
         self.img_size = img_size
         self.use_gpu = use_gpu
-        
-        self.data_config = {
-            'num_grid':5,
-            'n_data':n_data,
-            'sigma':0.05
-        }
         
         self.data = data
         self.data_loader = torch.utils.data.DataLoader(self.data, batch_size=self.batch_size, shuffle=True)
@@ -221,8 +215,12 @@ class Online_Kernel_GAN(object):
         plt.axis('equal')
         ax.scatter(fake_t_data[:,0], fake_t_data[:,1], marker='.')
         plt.axis('equal')
-        ax.set_xlim([-6, 6])
-        ax.set_ylim([-6, 6])
+        if self.data.name == 'gaussian_grid':
+            ax.set_xlim([-6, 6])
+            ax.set_ylim([-6, 6])
+        else:
+            ax.set_xlim([-2*self.data.r, 2*self.data.r])
+            ax.set_ylim([-2*self.data.r, 2*self.data.r])
 
         if not os.path.exists('out_image/'):
             os.makedirs('out_image/')
@@ -232,11 +230,15 @@ class Online_Kernel_GAN(object):
         plt.savefig('out_image/out_gaussian2d_online_kernel/{}.png'.format(str(epoch).zfill(3)), bbox_inches='tight')
         plt.close(fig)
         samples = self.generator(self.noise(2500)).cpu().detach().numpy()
-        num_modes, num_high_qual_samples, mode_counter = mode_collapse_metric(samples, self.data_config['num_grid'], self.data_config['sigma'])
-
-        print('Total number of generated modes is ', num_modes)
-        print('The number of high quality samples among 2500 samples is', num_high_qual_samples)
-        print('The mode dictionary is', mode_counter)
+        if self.data.name == 'circle2d':
+            num_high_qual_samples, center_captured = self.data.mode_collapse_metric(samples)
+            print('The number of high quality samples among 2500 samples is', num_high_qual_samples)
+            print('Is the center captured?', center_captured)
+        else:
+            num_modes, num_high_qual_samples, mode_counter = self.data.mode_collapse_metric(samples)
+            print('Total number of generated modes is ', num_modes)
+            print('The number of high quality samples among 2500 samples is', num_high_qual_samples)
+            print('The mode dictionary is', mode_counter)
 
         
     def evaluate_image(self, epoch, n_batch):
@@ -349,10 +351,12 @@ class Online_Kernel_GAN(object):
             else:
                 print('epoch # :', epoch, 'gamma :', self.clf.gamma, 'gen loss :', g_error.item())
             
-            if self.data_type == 'gaussian2dgrid':
-                self.evaluate_gaussian2d(epoch)
-            else:
-                self.evaluate_image(epoch, n_batch)
+            if epoch % 10 == 0:
+                if self.data_type == 'gaussian2dgrid':
+                    self.evaluate_gaussian2d(epoch)
+                else:
+                    self.evaluate_image(epoch, n_batch)
                 
             if self.data_type == 'gaussian2dgrid':
                 self.clf.gamma_update()
+
