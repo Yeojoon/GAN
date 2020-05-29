@@ -3,7 +3,6 @@ import numpy as np
 from abc import ABC, abstractmethod
 from util import *
 import matplotlib.pyplot as plt
-from IPython.display import clear_output
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -239,14 +238,12 @@ class Grid2D(Dataset):
         batch += np.random.normal(0, self.variance, (batch_size,2))
         return torch.from_numpy(batch).float().to(device)
 
-    def write_sample(self, generator_sample, file_path, consistent):
+    def write_sample(self, generator_sample, file_path, consistent,plotter=plt):
         """Writes a sample of generator points"""
         if self.consistent_sample is None: # and consistent
             self.consistent_sample = self.sample_train(self.preferred_sample_size,device=cpu)
 
 #         plt.close()
-        clear_output(wait=True)
-        plt.figure(figsize=(5,5))
         plt.scatter(generator_sample[:,0], generator_sample[:,1], label="Fake")
         if consistent:
             plt.scatter(self.consistent_sample[:,0], self.consistent_sample[:,1], label="Real")
