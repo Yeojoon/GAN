@@ -3,6 +3,11 @@ import numpy as np
 from abc import ABC, abstractmethod
 from util import *
 import matplotlib.pyplot as plt
+from IPython.display import clear_output
+
+
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+cpu = torch.device("cpu")
 
 class Dataset(ABC):
     @abstractmethod
@@ -19,7 +24,7 @@ class Dataset(ABC):
         self.preferred_sample_size = preferred_sample_size
 
     @abstractmethod
-    def sample_train(self, batch_size):
+    def sample_train(self, batch_size,device=device):
         """Samples from the "training dataset". For all intents and purposes,
         this dataset object only represents a training set, but in the future
         it may support sampling from test sets as well.
@@ -67,12 +72,12 @@ class MNIST(Dataset):
         super().__init__("MNIST", 64)
         self.normalization = normalization
         self.shape = shape
-        self.mnist_train = torchdatasets.MNIST(download_dir, train=True, download=True).data
-        self.mnist_test = torchdatasets.MNIST(download_dir, train=False, download=True).data
+        self.mnist_train = torchdatasets.MNIST(download_dir, train=True, download=True).data.to(device)
+        self.mnist_test = torchdatasets.MNIST(download_dir, train=False, download=True).data.to(device)
         self.num_train = self.mnist_train.shape[0]
         self.num_test = self.mnist_test.shape[0]
 
-    def sample_train(self, batch_size):
+    def sample_train(self, batch_size,device=device):
         """Samples from MNIST training data.
 
         Arguments:
@@ -94,6 +99,7 @@ class MNIST(Dataset):
 
     def write_sample(self, generator_sample, file_path, consistent):
         """Writes a sample of generator images"""
+        generator_sample.to(cpu)
         sampled_ims = generator_sample.reshape(-1, 28, 28)
         im = convert_to_image(tile_images(sampled_ims, (8, 8), 4))
         im.save(file_path + ".png")
@@ -143,7 +149,7 @@ class GMM(Dataset):
         self.cluster_cdf = np.cumsum(self.cluster_dist)
         self.consistent_sample = None
 
-    def sample_train(self, batch_size):
+    def sample_train(self, batch_size,device=device):
         """Samples from GMM.
 
         Arguments:
@@ -156,12 +162,12 @@ class GMM(Dataset):
             batch.append(np.clip(np.random.normal(
                 self.cluster_means[cluster,:],
                 self.cluster_var[cluster,:]), 0, 1))
-        return torch.from_numpy(np.array(batch)).float()
+        return torch.from_numpy(np.array(batch)).float().to(device)
 
     def write_sample(self, generator_sample, file_path, consistent):
         """Writes a sample of generator points"""
         if self.consistent_sample is None: # and consistent
-            self.consistent_sample = self.sample_train(self.preferred_sample_size)
+            self.consistent_sample = self.sample_train(self.preferred_sample_size,device=cpu)
 
         plt.close()
         plt.scatter(generator_sample[:,0], generator_sample[:,1], label="Fake")
@@ -191,16 +197,16 @@ class Ring2D(Dataset):
         self.variance = variance
         self.consistent_sample = None
 
-    def sample_train(self, batch_size):
+    def sample_train(self, batch_size,device=device):
         batch = self.means[np.random.randint(0, self.count, (batch_size,))]
         # add noise
         batch += np.random.normal(0, self.variance, (batch_size,2))
-        return torch.from_numpy(batch).float()
+        return torch.from_numpy(batch).float().to(device)
 
     def write_sample(self, generator_sample, file_path, consistent):
         """Writes a sample of generator points"""
         if self.consistent_sample is None: # and consistent
-            self.consistent_sample = self.sample_train(self.preferred_sample_size)
+            self.consistent_sample = self.sample_train(self.preferred_sample_size,device=cpu)
 
         plt.close()
         plt.scatter(generator_sample[:,0], generator_sample[:,1], label="Fake")
@@ -227,18 +233,20 @@ class Grid2D(Dataset):
         self.variance = variance
         self.consistent_sample = None
 
-    def sample_train(self, batch_size):
+    def sample_train(self, batch_size,device=device):
         batch = self.means[np.random.randint(0, self.count, (batch_size,))]
         # add noise
         batch += np.random.normal(0, self.variance, (batch_size,2))
-        return torch.from_numpy(batch).float()
+        return torch.from_numpy(batch).float().to(device)
 
     def write_sample(self, generator_sample, file_path, consistent):
         """Writes a sample of generator points"""
         if self.consistent_sample is None: # and consistent
-            self.consistent_sample = self.sample_train(self.preferred_sample_size)
+            self.consistent_sample = self.sample_train(self.preferred_sample_size,device=cpu)
 
-        plt.close()
+#         plt.close()
+        clear_output(wait=True)
+        plt.figure(figsize=(5,5))
         plt.scatter(generator_sample[:,0], generator_sample[:,1], label="Fake")
         if consistent:
             plt.scatter(self.consistent_sample[:,0], self.consistent_sample[:,1], label="Real")
@@ -253,4 +261,4 @@ class Grid2D(Dataset):
             plt.show()
         else:
             plt.savefig(file_path + ".png")
-        plt.close()
+#         plt.close()

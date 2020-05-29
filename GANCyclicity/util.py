@@ -2,6 +2,8 @@ import torch
 import numpy as np
 from PIL import Image
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
 def get_gradient_norm(parameters):
     """Given a parameter set, returns the 2-norm of the gradients
     of all the parameters concatenated together. Note that this is
@@ -29,7 +31,7 @@ def sample_latent_prior(latent_dim, batch_size):
     batch_size -- the number of samples to take, for use as a batch
     """
     z = np.random.normal(size=(batch_size, latent_dim))
-    return torch.from_numpy(z).float()
+    return torch.from_numpy(z).float().to(device)
 
 
 def sample_generator(generator, latent_dim, batch_size):
