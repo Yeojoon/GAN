@@ -15,6 +15,9 @@ from sklearn.svm import SVC
 from data.SyntheticDataset import gaussianGridDataset, ringDataset, circleDataset
 import time
 
+from IPython.display import clear_output
+
+
 import os
 
 
@@ -39,7 +42,9 @@ class Online_Kernel_GAN(object):
         self.batch_size = batch_size
         self.img_size = img_size
         self.use_gpu = use_gpu
-        
+
+        self.discriminator_reprs = []
+                
         self.data = data
         self.data_loader = torch.utils.data.DataLoader(self.data, batch_size=self.batch_size, shuffle=True)
         self.data_type = data_type
@@ -285,8 +290,41 @@ class Online_Kernel_GAN(object):
             plt.savefig('out_image/out_celeba_online_kernel/epoch{}_nbatch{}.png'.format(str(epoch).zfill(3), str(n_batch).zfill(4)), bbox_inches='tight')
         plt.close(fig)
         
+    
+    def show_cyclicity(self,plotter):
+        from sklearn.decomposition import PCA
+        discriminator_reprs = np.array(self.discriminator_reprs)
+        pca = PCA(n_components = 2)
+        pca.fit(discriminator_reprs)
+        ldr = pca.transform(discriminator_reprs)        
+        n = ldr.shape[0]
+        cmap = plotter.get_cmap("Reds")
+        clear_output(wait=True)
+        for i in range(n):
+            plotter.scatter(ldr[i,0],ldr[i,1],color=cmap(i/n))
+            if i < n - 1:
+                plotter.plot(ldr[i:i+2,0], ldr[i:i+2,1], color=cmap((i+0.5)/n))   
+        plotter.show()
+            
+
         
-    def train_GAN(self):  
+    def train_GAN(self,plotter=False):  
+        
+        
+        if plotter:
+            totsteps = 0
+
+            D_POINT_REPR_SIZE = 500 #256 #16384
+
+            # Take a sample of training points from training set
+            temp_data_loader = torch.utils.data.DataLoader(self.data, batch_size=D_POINT_REPR_SIZE, shuffle=True)
+
+            randsample = iter(temp_data_loader).next().type(torch.FloatTensor)
+            if self.use_gpu and torch.cuda.is_available(): 
+                randsample = randsample.cuda()
+            D_POINT_REPR_PTS = randsample   
+
+            REPR_PTS = D_POINT_REPR_PTS        
             
         for epoch in range(self.num_epochs):
             epoch_start = time.time()
@@ -294,7 +332,15 @@ class Online_Kernel_GAN(object):
             for n_batch, (real_batch) in enumerate(tqdm(self.data_loader)):
                 if self.data_type is not 'gaussian2dgrid':
                     real_batch = real_batch[0] # real_batch is tuple for mnist, svhn, ... (data, target)
-                    
+                if plotter:
+                    totsteps += self.batch_size
+
+                    if totsteps > 200:
+                        # APPEND NEW FUNC VALS TO REPR pts 
+                        self.discriminator_reprs.append(self.discriminator(REPR_PTS).cpu().numpy())
+                        totsteps = 0
+                
+                
                 if self.data_type == 'gaussian2dgrid':
                     real_data = real_batch.type(torch.FloatTensor)
                 elif self.data_type == 'mnist' and self.model_type == 'VGAN':
@@ -329,6 +375,10 @@ class Online_Kernel_GAN(object):
                             self.evaluate_image(epoch, n_batch)
                             print('[{}/{}][{}/{}]'.format(epoch, self.num_epochs, n_batch, len(self.data_loader)), 'gen loss :', g_error.item(), 'encoder loss :', e_error.item())
 
+
+            if epoch > 2 and plotter:
+                self.show_cyclicity(plotter)
+                            
             self.scheduler_g.step()
             if not os.path.exists('checkpoint/'):
                 os.makedirs('checkpoint/')
