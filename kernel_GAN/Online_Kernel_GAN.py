@@ -236,14 +236,16 @@ class Online_Kernel_GAN(object):
         plt.close(fig)
         samples = self.generator(self.noise(2500)).cpu().detach().numpy()
         if self.data.name == 'circle2d':
-            num_high_qual_samples, center_captured = self.data.mode_collapse_metric(samples)
+            num_high_qual_samples, center_captured, reverse_kl = self.data.mode_collapse_metric(samples)
             print('The number of high quality samples among 2500 samples is', num_high_qual_samples)
             print('Is the center captured?', center_captured)
+            print('The reverse kl divergence is', reverse_kl)
         else:
-            num_modes, num_high_qual_samples, mode_counter = self.data.mode_collapse_metric(samples)
+            num_modes, num_high_qual_samples, mode_counter, reverse_kl = self.data.mode_collapse_metric(samples)
             print('Total number of generated modes is ', num_modes)
             print('The number of high quality samples among 2500 samples is', num_high_qual_samples)
             print('The mode dictionary is', mode_counter)
+            print('The reverse kl divergence is', reverse_kl)
 
         
     def evaluate_image(self, epoch, n_batch):
@@ -395,13 +397,14 @@ class Online_Kernel_GAN(object):
             if not os.path.exists(checkpoint_folder):
                 os.makedirs(checkpoint_folder)
             torch.save(self.generator.state_dict(), os.path.join(checkpoint_folder, 'gen_{}'.format(str(epoch).zfill(3))))
-            print('spent time for epoch {} is {}s'.format(epoch, time.time()-epoch_start))
-            if self.model_type == 'DCGAN':
-                print('epoch # :', epoch, 'gen loss :', g_error.item(), 'encoder loss :', e_error.item())
-            else:
-                print('epoch # :', epoch, 'gamma :', self.clf.gamma, 'gen loss :', g_error.item())
-            
             if epoch % 10 == 0:
+                print('spent time for epoch {} is {}s'.format(epoch, time.time()-epoch_start))
+                if self.model_type == 'DCGAN':
+                    print('epoch # :', epoch, 'gen loss :', g_error.item(), 'encoder loss :', e_error.item())
+                else:
+                    print('epoch # :', epoch, 'gamma :', self.clf.gamma, 'gen loss :', g_error.item())
+            
+            
                 if self.data_type == 'gaussian2dgrid':
                     self.evaluate_gaussian2d(epoch)
                 else:
