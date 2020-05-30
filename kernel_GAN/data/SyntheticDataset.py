@@ -8,6 +8,7 @@ class gaussianGridDataset(Dataset):
     def __init__(self, n, n_data, sig):
         self.grid = np.linspace(-4, 4, n)
         self.data = None
+        self.n = n
         self.sig = sig
         for i in range(n):
             mean_x = self.grid[i]
@@ -44,9 +45,17 @@ class gaussianGridDataset(Dataset):
         mode_counter = Counter(feasible_ind)
 
         num_modes = len(mode_counter)
-        num_high_qual_samples = np.sum(np.array(list(mode_counter.values())))
+        real_mode_arr = np.ones(self.n**2)/self.n**2
+        fake_mode_arr = np.zeros(self.n**2)
+        for i in range(self.n**2):
+            if i in mode_counter.keys():
+                fake_mode_arr[i] = mode_counter[i]
+             
+        num_high_qual_samples = np.sum(fake_mode_arr)
+        fake_mode_arr /= num_high_qual_samples
+        reverse_kl = np.sum(np.where(fake_mode_arr != 0, fake_mode_arr * np.log(fake_mode_arr / real_mode_arr), 0))
 
-        return num_modes, num_high_qual_samples, mode_counter
+        return num_modes, int(num_high_qual_samples), mode_counter, reverse_kl
     
     
     
@@ -55,6 +64,7 @@ class ringDataset(Dataset):
     def __init__(self, n, n_data, sig = 0.01, r = 1):
         self.data = None
         self.means = []
+        self.n = n
         self.r = r
         self.sig = sig
         for i in range(n):
@@ -91,9 +101,17 @@ class ringDataset(Dataset):
         mode_counter = Counter(feasible_ind)
         
         num_modes = len(mode_counter)
-        num_high_qual_samples = np.sum(np.array(list(mode_counter.values())))
-    
-        return num_modes, num_high_qual_samples, mode_counter
+        real_mode_arr = np.ones(self.n)/self.n
+        fake_mode_arr = np.zeros(self.n)
+        for i in range(self.n):
+            if i in mode_counter.keys():
+                fake_mode_arr[i] = mode_counter[i]
+             
+        num_high_qual_samples = np.sum(fake_mode_arr)
+        fake_mode_arr /= num_high_qual_samples
+        reverse_kl = np.sum(np.where(fake_mode_arr != 0, fake_mode_arr * np.log(fake_mode_arr / real_mode_arr), 0))
+
+        return num_modes, int(num_high_qual_samples), mode_counter, reverse_kl
     
     
     
@@ -131,8 +149,11 @@ class circleDataset(Dataset):
         # sample point and check if it falls within r +/- 3 std dev (or 0 + 3
         # std dev)
         sample_norms = np.linalg.norm(samples, axis=1)
-        num_high_qual_samples = ((sample_norms < 3 * self.sig) |
-            ((sample_norms < self.r + 3 * self.sig) & (sample_norms > self.r - 3 * self.sig))).sum()
+        real_mode_arr = np.array([100.0, 3.0])/103
+        fake_mode_arr = np.array([((sample_norms < self.r + 3 * self.sig) & (sample_norms > self.r - 3 * self.sig)).sum(), (sample_norms < 3 * self.sig).sum()])
+        num_high_qual_samples = np.sum(fake_mode_arr)
+        fake_mode_arr = fake_mode_arr.astype(float)/num_high_qual_samples
+        reverse_kl = np.sum(np.where(fake_mode_arr != 0, fake_mode_arr * np.log(fake_mode_arr / real_mode_arr), 0))
         # only mode we're checking capture of is center mode
         center_captured = (sample_norms.min() < 3 * self.sig)
-        return num_high_qual_samples, center_captured
+        return num_high_qual_samples, center_captured, reverse_kl
