@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
+
 # 79216 parameters, 2 fully connected layers
 class MNISTFullyConnectedGenerator(nn.Module):
     def __init__(self, latent_dim=32):

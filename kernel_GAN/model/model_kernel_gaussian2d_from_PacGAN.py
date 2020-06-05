@@ -40,7 +40,7 @@ class GeneratorNet(torch.nn.Module):
         )
         self.out = nn.Sequential( 
             nn.Linear(hidden_size, output_size),
-            nn.BatchNorm1d(output_size),
+            #nn.BatchNorm1d(output_size),
             #nn.ReLU()
         )
         self.name = "GeneratorNet"

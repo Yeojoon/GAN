@@ -21,9 +21,9 @@ def normal_init(m, mean, std):
 # G(z)
 class generator_mnist(nn.Module):
     # initializers
-    def __init__(self, d=128):
+    def __init__(self, z_size, d=128):
         super(generator_mnist, self).__init__()
-        self.deconv1 = nn.ConvTranspose2d(100, d*8, 4, 1, 0)
+        self.deconv1 = nn.ConvTranspose2d(z_size, d*8, 4, 1, 0)
         self.deconv1_bn = nn.BatchNorm2d(d*8)
         self.deconv2 = nn.ConvTranspose2d(d*8, d*4, 4, 2, 1)
         self.deconv2_bn = nn.BatchNorm2d(d*4)
@@ -40,7 +40,6 @@ class generator_mnist(nn.Module):
 
     # forward method
     def forward(self, input):
-        # x = F.relu(self.deconv1(input))
         x = F.relu(self.deconv1_bn(self.deconv1(input)))
         x = F.relu(self.deconv2_bn(self.deconv2(x)))
         x = F.relu(self.deconv3_bn(self.deconv3(x)))
@@ -48,7 +47,38 @@ class generator_mnist(nn.Module):
         x = nn.Tanh()(self.deconv5(x))
 
         return x
-        
+    
+    
+
+class encoder_mnist(nn.Module):
+    # initializers
+    def __init__(self, z_size, d=128):
+        super(encoder_mnist, self).__init__()
+        self.z_size = z_size
+        self.conv1 = nn.Conv2d(1, d, 4, 2, 1)
+        self.conv2 = nn.Conv2d(d, d*2, 4, 2, 1)
+        self.conv2_bn = nn.BatchNorm2d(d*2)
+        self.conv3 = nn.Conv2d(d*2, d*4, 4, 2, 1)
+        self.conv3_bn = nn.BatchNorm2d(d*4)
+        self.conv4 = nn.Conv2d(d*4, d*8, 4, 2, 1)
+        self.conv4_bn = nn.BatchNorm2d(d*8)
+        self.conv5 = nn.Conv2d(d*8, z_size, 4, 1, 0)
+
+    # weight_init
+    def weight_init(self, mean, std):
+        for m in self._modules:
+            normal_init(self._modules[m], mean, std)
+
+    # forward method
+    def forward(self, input):
+        x = F.leaky_relu(self.conv1(input))
+        x = F.leaky_relu(self.conv2_bn(self.conv2(x)))
+        x = F.leaky_relu(self.conv3_bn(self.conv3(x)))
+        x = F.leaky_relu(self.conv4_bn(self.conv4(x)))
+        x = self.conv5(x)
+
+        return x.view(-1, self.z_size)
+
 
 # helper deconv function
 def deconv(in_channels, out_channels, kernel_size, stride=2, padding=1, batch_norm=True):
@@ -148,3 +178,72 @@ class encoder_svhn(nn.Module):
         out = self.fc(x)
         
         return out
+    
+    
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        nn.init.normal_(m.weight.data, 0.0, 0.02)
+    elif classname.find('BatchNorm') != -1:
+        nn.init.normal_(m.weight.data, 1.0, 0.02)
+        nn.init.constant_(m.bias.data, 0)
+        
+        
+class generator_celeba(nn.Module):
+    def __init__(self, z_size, ngf=64, nc=3):
+        super(generator_celeba, self).__init__()
+        self.main = nn.Sequential(
+            # input is Z, going into a convolution
+            nn.ConvTranspose2d(z_size, ngf * 8, 4, 1, 0, bias=False),
+            nn.BatchNorm2d(ngf * 8),
+            nn.ReLU(True),
+            # state size. (ngf*8) x 4 x 4
+            nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 4),
+            nn.ReLU(True),
+            # state size. (ngf*4) x 8 x 8
+            nn.ConvTranspose2d( ngf * 4, ngf * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf * 2),
+            nn.ReLU(True),
+            # state size. (ngf*2) x 16 x 16
+            nn.ConvTranspose2d( ngf * 2, ngf, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ngf),
+            nn.ReLU(True),
+            # state size. (ngf) x 32 x 32
+            nn.ConvTranspose2d( ngf, nc, 4, 2, 1, bias=False),
+            nn.Tanh()
+            # state size. (nc) x 64 x 64
+        )
+
+    def forward(self, x):
+        return self.main(x)
+
+    
+    
+class encoder_celeba(nn.Module):
+    def __init__(self, z_size, ndf=64, nc=3):
+        super(encoder_celeba, self).__init__()
+        self.z_size = z_size
+        self.main = nn.Sequential(
+            # input is (nc) x 64 x 64
+            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf) x 32 x 32
+            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 2),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*2) x 16 x 16
+            nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 4),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*4) x 8 x 8
+            nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 8),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*8) x 4 x 4
+            nn.Conv2d(ndf * 8, z_size, 4, 1, 0, bias=False)
+        )
+
+    def forward(self, x):
+        out = self.main(x)
+        return out.view(-1, self.z_size)
