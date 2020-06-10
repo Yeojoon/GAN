@@ -46,7 +46,6 @@ class KernelClassifier:
         if self.model_type == 'DCGAN':
             if self.data_type == 'mnist':
                 self.encoder = model_DCGAN.encoder_mnist(z_size=self.z_size)
-                #self.encoder.apply(model_DCGAN.weights_init)
             elif self.data_type == 'svhn':
                 self.encoder = model_DCGAN.encoder_svhn(z_size=self.z_size)
             elif self.data_type == 'celeba':
@@ -140,7 +139,6 @@ class KernelClassifier:
     
     def funceval(self,X):
         kernel_vals = self.kernel(X)
-#         print(kernel_vals)
         if torch.isnan(kernel_vals).any():
             print("nan encountered")
             print(self.alphas)
@@ -151,8 +149,6 @@ class KernelClassifier:
     
     def predict_proba(self,X):
         vals = self.funceval(X)
-        #expnegtwovals = torch.exp(-vals)
-        #probs = 1/(1 + expnegtwovals)
         probs = torch.sigmoid(-vals)
         if torch.isnan(probs).any():
             print(probs)
@@ -172,10 +168,9 @@ class KernelClassifier:
     
     
     def train_encoder(self, real_data, fake_data):
-        # Reset gradients
+        
         self.e_optimizer.zero_grad()
-        # Sample noise and generate fake data
-        #start = time.time()
+        
         prediction_real = self.funceval(real_data)
         prediction_fake = self.funceval(fake_data)
         prediction_real = prediction_real.reshape(-1, 1)
@@ -183,16 +178,12 @@ class KernelClassifier:
         if self.use_gpu and torch.cuda.is_available():
             prediction_real = prediction_real.cuda()
             prediction_fake = prediction_fake.cuda()
-        #print('spent time for getting D when training encoder is {}'.format(time.time()-start))
-        # Calculate error and backpropagate
+        
         error = (nn.ReLU()(1.0 - prediction_real) + nn.ReLU()(1.0 + prediction_fake)).mean() #hinge loss
-
-        #start = time.time()
         error.backward()
-        #print('spent time for backpropagation when training encoder is {}'.format(time.time()-start))
-        # Update weights with gradients
+        
         self.e_optimizer.step()
-        # Return error
+        
         return error
     
     
@@ -236,7 +227,6 @@ class KernelClassifier:
     def losses(self,X,Y):
         vals = self.funceval(X)
         if self.lossfn == 'logistic':
-            #lss = torch.log(1 + torch.exp(-Y*vals))
             lss = -torch.log(torch.sigmoid(-Y*vals))
         elif self.lossfn == 'hinge':
             zeros = torch.zeros(len(Y), device=self.device)
@@ -260,12 +250,8 @@ class KernelClassifier:
         if self.lossfn == 'logistic':
             
             newalphas = self.eta * Y * torch.sigmoid(-funcvals*Y)
-            #newalphas = self.eta * Y * torch.exp(-funcvals*Y) / (1 + torch.exp(-funcvals*Y))
-            #newalphas =   self.eta * ((Y + 1)/2 - self.predict_proba(X))
-            
             self.offset += self.eta * (Y * torch.sigmoid(-funcvals*Y)).mean()
-            #self.offset += self.eta * (Y * torch.exp(-funcvals*Y) / (1 + torch.exp(-funcvals*Y))).mean()
-            #self.offset += self.eta * ((Y + 1)/2 - self.predict_proba(X)).mean()
+            
             if self.model_type == 'DCGAN':
                 newalphas = newalphas.detach()
                 self.offset = self.offset.detach()
@@ -280,10 +266,7 @@ class KernelClassifier:
                 raise Exception("nan encountered in generating newalphas")
                 
         elif self.lossfn == 'hinge':
-            """
-            loss(theta,x,y) = max(0,1-yf_theta(x))
-            loss'(theta,x,y) = 1[yf_theta(x) < 1](yf_theta(x))\nabla_theta f_theta)            
-            """
+            
             sigma = torch.where(Y*funcvals<=self.margin, torch.ones(1, device=self.device), torch.zeros(1, device=self.device))
             newalphas = self.eta * sigma * Y  
             
@@ -327,7 +310,6 @@ class KernelClassifier:
             segments = [(a_start, a_end, b_start, b_end)]
             newpointer = a_end if a_end < self.budget else 0
         for a_start, a_end, b_start, b_end in segments:
-            #self.keypoints[a_start:a_end,:] = newkeypoints[b_start:b_end,:]
             self.keypoints[a_start:a_end] = newkeypoints[b_start:b_end]
             self.alphas[a_start:a_end] = newalphas[b_start:b_end]
 
