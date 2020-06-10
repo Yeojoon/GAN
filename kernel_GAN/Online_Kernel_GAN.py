@@ -52,8 +52,12 @@ class Online_Kernel_GAN(object):
         
         if self.data_type == 'gaussian2dgrid':
             self.z_size = 2
+            self.division = 20
+            self.epoch_arr = []
+            self.reverse_kl = []
         else:
             self.z_size = 100
+            self.division = 1
         
         self.device = torch.device("cuda" if self.use_gpu and torch.cuda.is_available() else "cpu")
         
@@ -176,26 +180,19 @@ class Online_Kernel_GAN(object):
 
 
     def train_generator(self, optimizer, fake_data):
-        # 2. Train Generator
-        # Reset gradients
+        
         optimizer.zero_grad()
-        # Sample noise and generate fake data
-        #start = time.time()
+       
         prediction = self.discriminator(fake_data)
         prediction = prediction.reshape(-1, 1)
         if self.use_gpu and torch.cuda.is_available():
             prediction = prediction.cuda()
-        #print('spent time for getting D is {}'.format(time.time()-start))
-        # Calculate error and backpropagate
         #error = - nn.LogSigmoid()(prediction).mean()
         error = nn.ReLU()(1.0 - prediction).mean() #hinge loss
-
-        #start = time.time()
         error.backward()
-        #print('spent time for backpropagation is {}'.format(time.time()-start))
-        # Update weights with gradients
+        
         optimizer.step()
-        # Return error
+        
         return error
 
     
@@ -246,6 +243,17 @@ class Online_Kernel_GAN(object):
             print('The number of high quality samples among 2500 samples is', num_high_qual_samples)
             print('The mode dictionary is', mode_counter)
             print('The reverse kl divergence is', reverse_kl)
+        self.epoch_arr.append(epoch)
+        self.reverse_kl.append(reverse_kl)
+        if epoch == self.num_epochs:
+            fig = plt.figure()
+            ax = plt.axes()
+            ax.plot(self.epoch_arr, self.reverse_kl)
+            plt.title("Reverse KL Divergence Graph")
+            plt.xlabel("epoch")
+            plt.ylabel("reverse KL")
+            plt.savefig('out_image/out_gaussian2d_online_kernel/reverse_KL_graph.png', bbox_inches='tight')
+            plt.close(fig)
 
         
     def evaluate_image(self, epoch, n_batch):
@@ -293,7 +301,7 @@ class Online_Kernel_GAN(object):
         plt.close(fig)
         
     
-    def show_cyclicity(self,plotter):
+    def show_cyclicity(self,plotter, epoch):
         from sklearn.decomposition import PCA
         discriminator_reprs = np.array(self.discriminator_reprs)
         pca = PCA(n_components = 2)
@@ -307,6 +315,13 @@ class Online_Kernel_GAN(object):
             if i < n - 1:
                 plotter.plot(ldr[i:i+2,0], ldr[i:i+2,1], color=cmap((i+0.5)/n))   
         plotter.show()
+        if not os.path.exists('out_image/'):
+            os.makedirs('out_image/')
+        if not os.path.exists('out_image/out_gaussian2d_online_kernel'):
+            os.makedirs('out_image/out_gaussian2d_online_kernel')
+        if not os.path.exists('out_image/out_gaussian2d_online_kernel/cycling_behavior'):
+            os.makedirs('out_image/out_gaussian2d_online_kernel/cycling_behavior')
+        plotter.savefig('out_image/out_gaussian2d_online_kernel/cycling_behavior/{}.png'.format(str(epoch).zfill(3)), bbox_inches='tight')
             
 
         
@@ -328,7 +343,7 @@ class Online_Kernel_GAN(object):
 
             REPR_PTS = D_POINT_REPR_PTS        
             
-        for epoch in range(self.num_epochs):
+        for epoch in range(1, 1 + self.num_epochs):
             epoch_start = time.time()
 
             for n_batch, (real_batch) in enumerate(tqdm(self.data_loader)):
@@ -354,21 +369,19 @@ class Online_Kernel_GAN(object):
                     real_data = real_data.cuda()
                     
                 fake_data = self.generator(self.noise(real_data.size(0))).detach()
-                    
+                
+                # Train the encoder when we use DCGAN architecture to OKGAN
                 if (self.model_type == 'DCGAN') and (epoch != 0 or n_batch != 0):
                     for i in range(self.e_steps):
                         fake_data = self.generator(self.noise(real_data.size(0))).detach()
                         e_error = self.clf.train_encoder(real_data, fake_data)
-                #start = time.time()   
-                #print(real_data.shape)
-                #print(fake_data.shape)
+                        
+                # Train the online kernel classifier
                 self.online_kernel(real_data, fake_data)
-                #print('spent time for SVM is {}'.format(time.time() - start))
-                # 2. Train Generator
-                # Generate fake data
+                
+                # Train the generator
                 for i in range(self.g_steps):
                     fake_data = self.generator(self.noise(real_data.size(0)))
-                    # Train G
                     g_error = self.train_generator(self.g_optimizer, fake_data)
                 
                 if self.model_type == 'DCGAN':
@@ -379,7 +392,7 @@ class Online_Kernel_GAN(object):
 
 
             if epoch > 2 and plotter:
-                self.show_cyclicity(plotter)
+                self.show_cyclicity(plotter, epoch)
                             
             self.scheduler_g.step()
             if not os.path.exists('checkpoint/'):
@@ -397,7 +410,7 @@ class Online_Kernel_GAN(object):
             if not os.path.exists(checkpoint_folder):
                 os.makedirs(checkpoint_folder)
             torch.save(self.generator.state_dict(), os.path.join(checkpoint_folder, 'gen_{}'.format(str(epoch).zfill(3))))
-            if epoch % 10 == 0:
+            if epoch % self.division == 0:
                 print('spent time for epoch {} is {}s'.format(epoch, time.time()-epoch_start))
                 if self.model_type == 'DCGAN':
                     print('epoch # :', epoch, 'gen loss :', g_error.item(), 'encoder loss :', e_error.item())
@@ -412,4 +425,3 @@ class Online_Kernel_GAN(object):
                 
             if self.data_type == 'gaussian2dgrid':
                 self.clf.gamma_update()
-
