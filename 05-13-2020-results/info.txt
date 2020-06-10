@@ -1,0 +1,15 @@
+ring2d runs:
+ num_epochs = 2000
+ gamma = 0.2
+ gamma_scale_rate = 1.0015
+
+circle2d runs:
+ num_epochs = 2000
+ gamma = 0.3
+ gamma_scale_rate = 1.002
+
+ring2d_2 runs:
+ num_epochs = 2000
+ gamma = 0.2
+ gamma_scale_rate = 1.001
+

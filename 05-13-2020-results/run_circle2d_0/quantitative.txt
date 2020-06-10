@@ -1,0 +1,2 @@
+num_high_quality: 2406
+center_captured: True
