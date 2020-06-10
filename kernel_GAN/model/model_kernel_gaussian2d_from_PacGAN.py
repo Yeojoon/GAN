@@ -1,16 +1,8 @@
 import torch
 from torch import nn, optim
 import torch.nn.functional as F
-from torch.autograd.variable import Variable
-from torchvision import transforms, datasets
-import numpy as np
-from tqdm import tqdm
-import matplotlib
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 
-import os
-import argparse
+
 
 class GeneratorNet(torch.nn.Module):
     
@@ -40,8 +32,6 @@ class GeneratorNet(torch.nn.Module):
         )
         self.out = nn.Sequential( 
             nn.Linear(hidden_size, output_size),
-            #nn.BatchNorm1d(output_size),
-            #nn.ReLU()
         )
         self.name = "GeneratorNet"
 
