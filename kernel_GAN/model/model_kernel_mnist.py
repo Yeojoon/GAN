@@ -1,15 +1,6 @@
 import torch
 from torch import nn, optim
-from torch.autograd.variable import Variable
-from torchvision import transforms, datasets
-import numpy as np
-from tqdm import tqdm
-import matplotlib
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 
-import os
-import argparse
 
 
 class GeneratorNet(torch.nn.Module):
@@ -45,4 +36,3 @@ class GeneratorNet(torch.nn.Module):
         x = self.hidden2(x)
         x = self.out(x)
         return x
-    
