@@ -5,7 +5,7 @@ One of the major breakthroughs in deep learning over the past five years has bee
 - OKGAN: Go to "OKGAN" folder -> run "Testing_Online_Kernel_GAN.ipynb"
 - BourGAN: Go to "BourGAN" folder -> Go to "src" -> run "gaussian_grid.ipynb", "gaussian_ring.ipynb", "gaussian_circle.ipynb" (We reimplement BourGAN based on neural network architectures of PacGAN)
 ## Results
-![Table](results/Table1.PNG)
+![](results/Table1.PNG)
 
 ## Requirements
 pytorch 1.4.0
