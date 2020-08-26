@@ -227,7 +227,7 @@ class KernelClassifier:
     def losses(self,X,Y):
         vals = self.funceval(X)
         if self.lossfn == 'logistic':
-            lss = -torch.log(torch.sigmoid(-Y*vals))
+            lss = -torch.log(torch.sigmoid(Y*vals))
         elif self.lossfn == 'hinge':
             zeros = torch.zeros(len(Y), device=self.device)
             lss_vals = self.margin - Y*vals
