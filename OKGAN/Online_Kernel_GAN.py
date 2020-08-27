@@ -118,7 +118,7 @@ class Online_Kernel_GAN(object):
 
     def fake_data_target(self, size):
         '''
-        Tensor containing zeros, with shape = size
+        Tensor containing -ones, with shape = size
         '''
         data = -torch.ones(size, device=self.device)
         return data
