@@ -161,7 +161,8 @@ class encoder_svhn(nn.Module):
         
         return out
     
-    
+
+# We use the same DCGAN structure for celeba and cifar10    
 def weights_init(m):
     classname = m.__class__.__name__
     if classname.find('Conv') != -1:
@@ -226,3 +227,61 @@ class encoder_celeba(nn.Module):
     def forward(self, x):
         out = self.main(x)
         return out.view(-1, self.z_size)
+
+    
+    
+class generator_cifar10(nn.Module):
+    def __init__(self, z_size=100, M=2):
+        super(generator_cifar10, self).__init__()
+        self.z_size = z_size
+        self.main = nn.Sequential(
+            nn.ConvTranspose2d(self.z_size, 1024, M, 1, 0, bias=False),  # 4, 4
+            nn.BatchNorm2d(1024),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(1024, 512, 4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(512),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(512, 256, 4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(128, 3, 4, stride=2, padding=1, bias=False),
+            nn.Tanh()
+        )
+
+    def forward(self, z):
+        return self.main(z)
+
+
+class encoder_cifar10(nn.Module):
+    def __init__(self, z_size=100, M=32):
+        super(encoder_cifar10, self).__init__()
+        self.z_size = z_size
+        self.main = nn.Sequential(
+            # 64
+            nn.Conv2d(3, 64, 5, 2, 2, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # 32
+            nn.Conv2d(64, 128, 5, 2, 2, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.BatchNorm2d(128),
+            # 16
+            nn.Conv2d(128, 256, 5, 2, 2, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.BatchNorm2d(256),
+            # 8
+            nn.Conv2d(256, 512, 5, 2, 2, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.BatchNorm2d(512)
+            # 4
+        )
+
+        self.linear = nn.Linear(M // 16 * M // 16 * 512, self.z_size)
+
+    def forward(self, x):
+        x = self.main(x)
+        x = torch.flatten(x, start_dim=1)
+        x = self.linear(x)
+        return x

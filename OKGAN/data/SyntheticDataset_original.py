@@ -4,8 +4,6 @@ from collections import Counter
 import sklearn
 import sklearn.datasets
 
-from .KLD_estimators import *
-
 
 
 class gaussianGridDataset(Dataset):
@@ -34,10 +32,6 @@ class gaussianGridDataset(Dataset):
         return self.n_data
     
     def mode_collapse_metric(self, samples):
-        fake_data = samples
-        real_data = self.data[:len(fake_data)]
-        samples = samples[:2500]
-        
         mean_arr = np.transpose([np.tile(self.grid, len(self.grid)), np.repeat(self.grid, len(self.grid))])
         dist_arr = np.zeros((len(samples), len(mean_arr)))
 
@@ -61,7 +55,7 @@ class gaussianGridDataset(Dataset):
              
         num_high_qual_samples = np.sum(fake_mode_arr)
         fake_mode_arr /= num_high_qual_samples
-        reverse_kl = naive_estimator(fake_data, real_data, k=10)
+        reverse_kl = np.sum(np.where(fake_mode_arr != 0, fake_mode_arr * np.log(fake_mode_arr / real_mode_arr), 0))
 
         return num_modes, int(num_high_qual_samples), mode_counter, reverse_kl
     
@@ -97,10 +91,6 @@ class ringDataset(Dataset):
     def mode_collapse_metric(self, samples):
         # samples (n, 2)
         # means (m, 2)
-        fake_data = samples
-        real_data = self.data[:len(fake_data)]
-        samples = samples[:2500]
-        
         dist_arr = []
         for mean in self.means:
             dist_arr.append(np.linalg.norm(samples - mean, axis=1)[:,None])
@@ -121,7 +111,7 @@ class ringDataset(Dataset):
              
         num_high_qual_samples = np.sum(fake_mode_arr)
         fake_mode_arr /= num_high_qual_samples
-        reverse_kl = naive_estimator(fake_data, real_data, k=10)
+        reverse_kl = np.sum(np.where(fake_mode_arr != 0, fake_mode_arr * np.log(fake_mode_arr / real_mode_arr), 0))
 
         return num_modes, int(num_high_qual_samples), mode_counter, reverse_kl
 
@@ -166,10 +156,6 @@ class nonuniform_ringDataset(Dataset):
     def mode_collapse_metric(self, samples):
         # samples (n, 2)
         # means (m, 2)
-        fake_data = samples
-        real_data = self.data[:len(fake_data)]
-        samples = samples[:2500]
-        
         dist_arr = []
         for mean in self.means:
             dist_arr.append(np.linalg.norm(samples - mean, axis=1)[:,None])
@@ -190,7 +176,7 @@ class nonuniform_ringDataset(Dataset):
              
         num_high_qual_samples = np.sum(fake_mode_arr)
         fake_mode_arr /= num_high_qual_samples
-        reverse_kl = naive_estimator(fake_data, real_data, k=10)
+        reverse_kl = np.sum(np.where(fake_mode_arr != 0, fake_mode_arr * np.log(fake_mode_arr / real_mode_arr), 0))
 
         return num_modes, int(num_high_qual_samples), mode_counter, reverse_kl
     
@@ -229,16 +215,12 @@ class circleDataset(Dataset):
         # the normalized sample point: thus, we can just take the norm of the
         # sample point and check if it falls within r +/- 3 std dev (or 0 + 3
         # std dev)
-        fake_data = samples
-        real_data = self.data[:len(fake_data)]
-        samples = samples[:2500]
-        
         sample_norms = np.linalg.norm(samples, axis=1)
         real_mode_arr = np.array([100.0, 3.0])/103
         fake_mode_arr = np.array([((sample_norms < self.r + 3 * self.sig) & (sample_norms > self.r - 3 * self.sig)).sum(), (sample_norms < 3 * self.sig).sum()])
         num_high_qual_samples = np.sum(fake_mode_arr)
         fake_mode_arr = fake_mode_arr.astype(float)/num_high_qual_samples
-        reverse_kl = naive_estimator(fake_data, real_data, k=10)
+        reverse_kl = np.sum(np.where(fake_mode_arr != 0, fake_mode_arr * np.log(fake_mode_arr / real_mode_arr), 0))
         # only mode we're checking capture of is center mode
         center_captured = (sample_norms.min() < 3 * self.sig)
         return num_high_qual_samples, center_captured, reverse_kl
