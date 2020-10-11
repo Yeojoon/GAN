@@ -49,7 +49,7 @@ def naive_estimator(s1, s2, k=1):
 
     nu = knn_distance(s1, s2, k-1)  # -1 because 'p1' is not in 's2'
     rho = knn_distance(s1, s1, k)
-    D = D + np.sum((d/n)*np.log(nu/rho))
+    D = np.sum((d/n)*np.log(nu/rho))
     return D
 
 
