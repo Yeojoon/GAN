@@ -63,13 +63,13 @@ class Online_Kernel_GAN(object):
         
         if self.data_type == 'gaussian2dgrid':
             self.z_size = 2
-            self.division = 20
+            self.division = 50
             self.epoch_arr = []
             self.reverse_kl = []
             if self.data.name == 'gmm2d':
                 self.num_samples = 5000
             else:
-                self.num_samples = 2500
+                self.num_samples = 5000
         else:
             if self.model_type == 'GAN with AE':
                 self.z_size = 10
