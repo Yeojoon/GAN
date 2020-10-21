@@ -249,7 +249,7 @@ class KernelClassifier:
         prediction_fake = prediction_fake.reshape(-1, 1).to(self.device)
         
         if self.lossfn == 'logistic':
-            error = -(nn.LogSigmoid()(prediction_real).mean() + nn.LogSigmoid()(-prediction_fake).mean())
+            error = (nn.ReLU()(1.0 - prediction_real) + nn.ReLU()(1.0 + prediction_fake)).mean()
             #error = -(nn.LogSigmoid()(prediction_real).mean() + nn.LogSigmoid()(-prediction_fake).mean()) - self.lmbda_IKL * ((torch.norm(self.IKLNet(self.noise(self.n_IKL_samples)), dim=1)**2).mean() - self.var_IKL)**2
         elif self.lossfn == 'hinge':
             error = (nn.ReLU()(1.0 - prediction_real) + nn.ReLU()(1.0 + prediction_fake)).mean()

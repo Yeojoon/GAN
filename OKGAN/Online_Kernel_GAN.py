@@ -124,8 +124,6 @@ class Online_Kernel_GAN(object):
             if self.model_type == 'DCGAN':
                 self.generator = model_DCGAN.generator_celeba(z_size=self.z_size)
                 self.generator.apply(model_DCGAN.weights_init)
-            #elif self.model_type == 'GAN with AE':
-            #    self.generator = model_GAN_in_codespace.generator_cifar10_in_code(z_size=self.z_size, code_dim=self.code_dim)
         elif self.data_type == 'cifar10':
             if self.model_type == 'DCGAN':
                 self.generator = model_DCGAN.generator_cifar10(z_size=self.z_size)
@@ -219,13 +217,9 @@ class Online_Kernel_GAN(object):
 
     def discriminator_for_graph(self, x, y):
 
-        alpha = self.clf.alphas.type(torch.FloatTensor)
-        rho = self.clf.offset.type(torch.FloatTensor)
-        key_vecs = self.clf.keypoints.type(torch.FloatTensor)
-        if self.use_gpu and torch.cuda.is_available():
-            alpha = alpha.cuda()
-            rho = rho.cuda()
-            key_vecs = key_vecs.cuda()
+        alpha = self.clf.alphas.type(torch.FloatTensor).to(self.device)
+        rho = self.clf.offset.type(torch.FloatTensor).to(self.device)
+        key_vecs = self.clf.keypoints.type(torch.FloatTensor).to(self.device)
 
         D = 0
         for j in range(len(key_vecs)):
@@ -251,7 +245,6 @@ class Online_Kernel_GAN(object):
             error = - nn.LogSigmoid()(prediction).mean()
         elif self.lossfn == 'hinge':
             error = nn.ReLU()(1.0 - prediction).mean() #hinge loss
-            #error = -prediction.mean()
         error.backward()
         
         optimizer.step()
@@ -272,12 +265,12 @@ class Online_Kernel_GAN(object):
             Y_tensor = Y_tensor.cuda()
         Z = self.discriminator_for_graph(X_tensor, Y_tensor)
         Z = Z.cpu().detach().numpy()
-        real_t_data = self.data.data[:2500]
-        fake_t_data = self.generator(self.noise(500))
+        real_t_data = self.data.data
+        fake_t_data = self.generator(self.noise(2500))
         fake_t_data = fake_t_data.cpu().detach().numpy()
         fig, ax = plt.subplots()
-        #CS = ax.contour(X, Y, Z)
-        #ax.clabel(CS, inline=1, fontsize=10)
+        CS = ax.contour(X, Y, Z)
+        ax.clabel(CS, inline=1, fontsize=10)
         fig.suptitle('2d gaussiangrid at epoch {}'.format(epoch))
         ax.scatter(real_t_data[:,0], real_t_data[:,1], marker='o', s=3)
         plt.axis('equal')
@@ -291,8 +284,6 @@ class Online_Kernel_GAN(object):
             ax.set_ylim([-4, 4])
         elif self.data.name == 'gmm2d':
             pass
-            #ax.set_xlim([-10, 10])
-            #ax.set_ylim([-7, 7])
         else:
             ax.set_xlim([-2*self.data.r, 2*self.data.r])
             ax.set_ylim([-2*self.data.r, 2*self.data.r])
@@ -454,10 +445,11 @@ class Online_Kernel_GAN(object):
         
         reverse_kl = self.data.reverse_kl_div(samples, le_classifier)
         print('Reverse KL divergence is', reverse_kl)
+        self.data.plot_histogram(samples, le_classifier, 'out_image/out_poisson_digit_online_kernel/histogram_okgan.png')
         
     
     
-    def calculate_score(self, model_path=None):
+    def calculate_score(self, model_path=None): #calculate Inception Score and FID on CIFAR-10
         
         if model_path != None:
             self.generator.eval()

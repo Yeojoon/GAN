@@ -1,4 +1,3 @@
-# I follow codes from https://github.com/w86763777/pytorch-gan-collections
 import random
 
 import torch

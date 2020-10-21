@@ -4,7 +4,6 @@ from torch.utils.data import Dataset, DataLoader
 from torch import nn
 from collections import Counter
 from scipy.stats import poisson
-import matplotlib.pyplot as plt
 
 
 
@@ -71,6 +70,10 @@ class PoissonDigitDataset(Dataset):
         fake_counter = Counter(self.fake_label(samples, lenet))
         print('fake counter is ', fake_counter)
         
+        #min_val = int(min(min(real_counter.keys()), min(fake_counter.keys())))
+        #max_val = int(max(max(real_counter.keys()), max(fake_counter.keys())))
+        #min_val = 70
+        #max_val = 130
         min_val = int(min(real_counter.keys()))
         max_val = int(max(real_counter.keys()))
         
@@ -87,22 +90,6 @@ class PoissonDigitDataset(Dataset):
         reverse_kl = np.sum(np.where(fake_dist != 0, fake_dist * np.log(fake_dist / real_dist), 0))
         
         return reverse_kl
-    
-    def plot_histogram(self, samples, lenet, path):
-        fake_samples = self.fake_label(samples, lenet)
-        min_val = min(self.label)
-        max_val = max(self.label)
-        ind = np.where((fake_samples <= max_val) & (fake_samples >= min_val))
-        
-        plt.rcParams["figure.figsize"] = [6, 4]
-        fig = plt.figure()
-        count, bins, ignored = plt.hist(fake_samples[ind], 14, density=True)
-        plt.title("fake poisson distribution", fontsize=20)
-        plt.xlabel("generated numbers", fontsize=20)
-        plt.ylabel("probability", fontsize=20)
-        
-        plt.savefig(path, bbox_inches='tight')
-        plt.close(fig)
         
         
     

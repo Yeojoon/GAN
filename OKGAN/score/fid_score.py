@@ -1,3 +1,4 @@
+# I follow codes from https://github.com/w86763777/pytorch-gan-collections
 import numpy as np
 import torch
 from scipy import linalg

@@ -1,3 +1,4 @@
+# I follow codes from https://github.com/w86763777/pytorch-gan-collections
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

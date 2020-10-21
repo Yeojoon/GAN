@@ -162,7 +162,7 @@ class encoder_svhn(nn.Module):
         return out
     
 
-
+# We use the same DCGAN structure for celeba and cifar10    
 def weights_init(m):
     classname = m.__class__.__name__
     if classname.find('Conv') != -1:
